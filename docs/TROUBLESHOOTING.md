@@ -9,10 +9,12 @@ Most first installs fail on one of these three.
    robot (`echo $ROS_DOMAIN_ID`) and pass the same value:
    `docker run -e ROS_DOMAIN_ID=7 --rm --network host ghcr.io/styri-dev/styri-core:v0.2.0`
 2. **`--network host`.** DDS discovery uses UDP multicast. Without host
-   networking the container can't see the robot's nodes. (Docker Desktop on
-   macOS and Windows runs containers in a VM, so host networking reaches the
-   VM, not your LAN. Use Linux, or Colima/OrbStack with their bridged
-   networking, for a robot on another machine.)
+   networking the container can't see the robot's nodes. On macOS and
+   Windows, Docker (Docker Desktop, Colima, OrbStack) runs containers in a VM
+   behind the computer's own network, so `--network host` doesn't reach your
+   LAN either. For a robot on another machine, run Styri on Linux: the robot
+   itself, a Linux box on the same network, or a Linux VM with bridged
+   networking (for example UTM's "Bridged (Advanced)" mode).
 3. **Topic names.** Styri looks for `/battery_state` and `/diagnostics`. If your
    robot uses other names (`ros2 topic list | grep -E "battery|diag"`), set
    `STYRI_BATTERY_TOPIC` and `STYRI_DIAGNOSTICS_TOPIC`.
