@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import time
 
 import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -22,6 +22,10 @@ from .model import Limits, SimRobot
 logger = logging.getLogger("styri_sim")
 
 FAULT_TOPIC = "/styri_sim/fault"
+# Faults can also be dropped into this directory as files (one fault per
+# file). `python3 -m styri_sim fault` uses it: no DDS discovery race, and it
+# can wait until the robot has actually applied the fault.
+FAULT_DIR = "/tmp/styri_sim_faults"
 PHYSICS_HZ = 50
 
 
@@ -47,6 +51,8 @@ class SimNode(Node):
         self.create_timer(0.1, self._publish_odom)
         self.create_timer(1.0, self._publish_diagnostics)
         self.create_timer(0.1, self._publish_scan)
+        os.makedirs(FAULT_DIR, exist_ok=True)
+        self.create_timer(0.05, self._poll_fault_files)
         logger.info("Sim robot up")
 
     def _on_cmd_vel(self, msg: Twist) -> None:
@@ -58,6 +64,24 @@ class SimNode(Node):
             logger.info("fault injected: %s", msg.data)
         except ValueError as exc:
             logger.warning("%s", exc)
+
+    def _poll_fault_files(self) -> None:
+        for name in sorted(os.listdir(FAULT_DIR)):
+            if not name.endswith(".fault"):
+                continue  # still being written
+            path = os.path.join(FAULT_DIR, name)
+            try:
+                with open(path) as f:
+                    fault = f.read().strip()
+                self.robot.inject_fault(fault, time.monotonic())
+                logger.info("fault injected: %s", fault)
+            except (OSError, ValueError) as exc:
+                logger.warning("%s", exc)
+            finally:
+                try:
+                    os.remove(path)  # removal is the acknowledgement
+                except OSError:
+                    pass
 
     def _step(self) -> None:
         now = time.monotonic()
@@ -138,23 +162,24 @@ def run() -> None:
 
 
 def send_fault(fault: str) -> None:
-    """One-shot publish to the fault topic (used by tests and humans)."""
-    rclpy.init()
-    node = Node("styri_sim_fault")
-    pub = node.create_publisher(String, FAULT_TOPIC, QoSProfile(
-        reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1))
+    """Inject a fault into the sim running in this container (tests and humans).
+
+    Writes the fault as a file the sim polls, then waits until the sim has
+    applied it and removed the file.
+    """
+    if not os.path.isdir(FAULT_DIR):
+        raise SystemExit("sim robot isn't running in this container")
+    tmp = os.path.join(FAULT_DIR, f"{time.time_ns()}.tmp")
+    with open(tmp, "w") as f:
+        f.write(fault)
+    path = tmp[: -len(".tmp")] + ".fault"
+    os.rename(tmp, path)  # atomic: the sim never sees half a fault
     deadline = time.monotonic() + 5
-    while pub.get_subscription_count() == 0 and time.monotonic() < deadline:
-        rclpy.spin_once(node, timeout_sec=0.1)
-    if pub.get_subscription_count() == 0:
-        raise SystemExit("sim robot not found on this ROS_DOMAIN_ID")
-    pub.publish(String(data=fault))
-    # Reliable QoS: wait until the robot has acknowledged it, so exiting
-    # straight away can't drop the message (it did on slow CI machines).
-    if not pub.wait_for_all_acked(Duration(seconds=5)):
-        raise SystemExit("sim robot did not acknowledge the fault")
-    node.destroy_node()
-    rclpy.try_shutdown()
+    while os.path.exists(path):
+        if time.monotonic() > deadline:
+            os.remove(path)
+            raise SystemExit("sim robot did not pick up the fault within 5 s")
+        time.sleep(0.02)
 
 
 def print_pose() -> None:
