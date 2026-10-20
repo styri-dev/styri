@@ -17,6 +17,7 @@ from typing import Callable, Protocol
 INFRA_TOPICS = {"/rosout", "/parameter_events"}
 
 RATE_WINDOW = 5.0  # seconds of history used for the Hz figure
+VOLTAGE_HYSTERESIS = 0.2  # V above STYRI_MIN_VOLTAGE before a low-voltage warning clears
 NO_ROBOT_GRACE = 30.0  # seconds before "no robot topics" is logged
 
 
@@ -82,12 +83,15 @@ def _level(value: float | None, warn: float, fault: float, prev: str, hyst: floa
 class Monitor:
     def __init__(self, activity: Activity, battery_topic: str, diagnostics_topic: str,
                  stale_after: float = 5.0, thresholds: Thresholds | None = None,
-                 clock: Callable[[], float] = time.monotonic):
+                 min_voltage: float | None = None, clock: Callable[[], float] = time.monotonic):
         self.activity = activity
         self.battery_topic = battery_topic
         self.diagnostics_topic = diagnostics_topic
         self.stale_after = stale_after
         self.th = thresholds or Thresholds()
+        # Optional: warn when the pack voltage drops below this, whatever the
+        # reported charge says (a sagging pack can still claim plenty left).
+        self.min_voltage = min_voltage
         self.clock = clock
         self.started = clock()
         self._lock = threading.Lock()
@@ -100,7 +104,7 @@ class Monitor:
         self.diag: dict[str, tuple[int, str]] = {}  # status name -> (level, message)
         self.diag_at: float | None = None
         # Remembered levels, for transitions.
-        self._levels = {"battery": "ok", "cpu": "ok"}
+        self._levels = {"battery": "ok", "cpu": "ok", "voltage": "ok"}
         self._diag_levels: dict[str, int] = {}
         self._overall = None
         self._graph_announced = False
@@ -193,6 +197,13 @@ class Monitor:
         self._transition("battery", bat_level,
                          {"warn": f"Battery below {th.battery_warn:.0f} %", "fault": f"Battery below {th.battery_fault:.0f} %"},
                          self.battery_topic)
+        volt_level = "ok"
+        v = self.voltage.value
+        if self.min_voltage is not None and v is not None and not bat_stale:
+            recovering = self._levels["voltage"] != "ok" and v < self.min_voltage + VOLTAGE_HYSTERESIS
+            volt_level = "warn" if v < self.min_voltage or recovering else "ok"
+        self._transition("voltage", volt_level, {"warn": f"Voltage below {self.min_voltage or 0:.1f} V"},
+                         self.battery_topic)
         self._transition("cpu", cpu_level,
                          {"warn": f"CPU temperature above {th.cpu_warn:.0f} °C", "fault": f"CPU temperature above {th.cpu_fault:.0f} °C"},
                          cpu.source)
@@ -220,6 +231,8 @@ class Monitor:
             pct = self.battery.value or 0
             reasons.append((bat_level, f"Battery critical — {pct:.0f} %. Dock the robot now." if bat_level == "fault"
                             else f"Battery low — {pct:.0f} %. Send to dock soon."))
+        if volt_level != "ok":
+            reasons.append((volt_level, f"Battery voltage low — {v:.2f} V, below {self.min_voltage:.1f} V."))
         if cpu_level != "ok":
             reasons.append((cpu_level, f"CPU temperature high — {cpu.value:.1f} °C."))
         reasons += diag_reasons
@@ -256,7 +269,7 @@ class Monitor:
             "robot_found": self.robot_found(),
             "health": {"level": overall, "line": line},
             "battery": self._tile(self.battery, now, bat_level, bat_stale),
-            "voltage": self._tile(self.voltage, now, "ok", bat_stale),
+            "voltage": self._tile(self.voltage, now, volt_level, bat_stale),
             "cpu_temp": self._tile(cpu, now, cpu_level, cpu_stale),
             "last_message": {"age": None if newest is None else round(now - newest.last, 2),
                              "topic": None if newest is None else newest.name},

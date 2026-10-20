@@ -4,7 +4,8 @@ name: CI
 #   unit        bridge + sim unit tests, UI build, bundle makes no external requests
 #   e2e         the Playwright suite against the real image and the simulated robot,
 #               on x86 and Arm, with Fast DDS and Cyclone DDS, a Humble robot, and a
-#               robot on a different DDS vendor. Each run also proves Styri is
+#               robot on a different DDS vendor (and once more with
+#               STYRI_MIN_VOLTAGE set). Each run also proves Styri is
 #               read-only (zero publishers/services) and sends nothing outside the
 #               LAN (no-egress guard, DNS included).
 # Pushes to main and v* tags also:
@@ -104,6 +105,15 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           npx playwright test
+      - name: Playwright again, with STYRI_MIN_VOLTAGE set
+        working-directory: e2e
+        env:
+          STYRI_MIN_VOLTAGE: "23.0"
+          E2E_MIN_VOLTAGE: "23.0"
+        run: |
+          docker compose up -d styri
+          curl -fsS --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/healthz
+          npx playwright test voltage
       - name: No egress
         run: sudo ci/egress-guard.sh check
       - name: Logs

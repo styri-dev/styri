@@ -25,6 +25,8 @@ class Config:
     diagnostics_topic: str = "/diagnostics"
     # A topic that has been publishing counts as stale after this long.
     stale_after: float = 5.0
+    # Optional low-voltage warning (volts). Unset: voltage is shown, never judged.
+    min_voltage: float | None = None
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -38,4 +40,5 @@ class Config:
             battery_topic=env("STYRI_BATTERY_TOPIC", cls.battery_topic),
             diagnostics_topic=env("STYRI_DIAGNOSTICS_TOPIC", cls.diagnostics_topic),
             stale_after=float(env("STYRI_STALE_AFTER", cls.stale_after)),
+            min_voltage=float(env("STYRI_MIN_VOLTAGE")) if env("STYRI_MIN_VOLTAGE", "").strip() else None,
         )

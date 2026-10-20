@@ -40,7 +40,9 @@ RMW_IMPLEMENTATION=rmw_cyclonedds_cpp docker compose up --build
 SIM_ROS_DISTRO=humble docker compose up --build
 ```
 
-`SIM_RMW_IMPLEMENTATION` sets the robot's DDS vendor on its own.
+`SIM_RMW_IMPLEMENTATION` sets the robot's DDS vendor on its own, and
+`STYRI_MIN_VOLTAGE=23.0` turns on the low-voltage warning (the voltage e2e
+test then needs `E2E_MIN_VOLTAGE=23.0` too; CI runs it both ways).
 
 ## Tests
 
@@ -114,10 +116,12 @@ Environment variables, for example `docker run -e ROS_DOMAIN_ID=7 …`:
 | `STYRI_BATTERY_TOPIC` | `/battery_state` | A `sensor_msgs/BatteryState` topic |
 | `STYRI_DIAGNOSTICS_TOPIC` | `/diagnostics` | A `diagnostic_msgs/DiagnosticArray` topic |
 | `STYRI_STALE_AFTER` | `5` | Seconds before a value counts as stale |
+| `STYRI_MIN_VOLTAGE` | unset | Volts; below it, a low-voltage warning (clears 0.2 V above) |
 | `STYRI_PORT` | `8080` | |
 | `STYRI_AUDIT_DB` | `/var/lib/styri/audit.db` | Mount a volume here to keep the log |
 
-Health comes from `/battery_state` (warning below 25 %, fault below 10 %), CPU
+Health comes from `/battery_state` (warning below 25 %, fault below 10 %, and
+below `STYRI_MIN_VOLTAGE` if you set it), CPU
 temperature (warning at 75 °C, fault at 85 °C; from a `cpu`-named status in
 `/diagnostics`, or the host's own sensor) and any `/diagnostics` status at
 WARN or ERROR.

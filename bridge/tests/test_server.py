@@ -53,7 +53,7 @@ def test_hello_activity_history_and_live_events():
         ws = await connect(url)
         hello = json.loads(await ws.recv())
         assert hello == {"type": "hello", "version": hello["version"], "robot": "test-bot", "domain": hello["domain"],
-                         "stale_after": 5.0, "controls": False}
+                         "stale_after": 5.0, "controls": False, "min_voltage": None}
         history = json.loads(await ws.recv())
         assert history["type"] == "activity"
         assert any(e["msg"].startswith("styri v") for e in history["events"])

@@ -35,6 +35,7 @@ services:
     environment:
       <<: *ros-env
       STYRI_ROBOT_NAME: sim-01
+      STYRI_MIN_VOLTAGE: "${STYRI_MIN_VOLTAGE:-}"
     volumes:
       - styri-data:/var/lib/styri
     depends_on: [sim]

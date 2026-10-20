@@ -11,6 +11,7 @@ export interface Hello {
   domain: string;
   stale_after: number;
   controls: boolean;
+  min_voltage: number | null; // STYRI_MIN_VOLTAGE, if set
 }
 
 export interface Tile {

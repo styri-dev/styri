@@ -131,3 +131,57 @@ def test_hot_cpu_is_reported_once():
     snap = m.evaluate()
     assert snap["health"]["line"] == "CPU temperature high — 78.0 °C."
     assert not any("cpu_monitor" in msg for msg in log.msgs())
+
+
+def make_with_min_voltage(min_voltage):
+    log, clock = Log(), Clock()
+    m = Monitor(log, "/battery_state", "/diagnostics", min_voltage=min_voltage, clock=clock)
+    m.discovered([("/battery_state", "sensor_msgs/msg/BatteryState")], lambda t: True)
+    return m, log, clock
+
+
+def feed_voltage(m, clock, volts, battery=90.0, seconds=1):
+    for _ in range(seconds * 10):
+        clock.t += 0.1
+        m.message("/battery_state", b"x")
+        m.battery_state(battery, volts)
+        m.host_vitals(50.0)
+
+
+def test_voltage_drop_is_shown_but_not_judged_without_a_threshold():
+    m, log, clock = make_with_min_voltage(None)
+    feed_voltage(m, clock, 24.9)
+    m.evaluate()
+    feed_voltage(m, clock, 22.4)  # battery_sag: voltage falls, charge doesn't
+    snap = m.evaluate()
+    assert snap["voltage"]["value"] == 22.4
+    assert snap["voltage"]["level"] == "ok" and snap["battery"]["level"] == "ok"
+    assert snap["health"] == {"level": "ok", "line": "All systems normal."}
+    assert not any("Voltage" in msg for msg in log.msgs())
+
+
+def test_below_min_voltage_warns_until_clearly_recovered():
+    m, log, clock = make_with_min_voltage(23.0)
+    feed_voltage(m, clock, 24.9)
+    assert m.evaluate()["health"]["level"] == "ok"
+    feed_voltage(m, clock, 22.4)
+    snap = m.evaluate()
+    assert snap["voltage"]["level"] == "warn" and snap["battery"]["level"] == "ok"
+    assert snap["health"] == {"level": "warn", "line": "Battery voltage low — 22.40 V, below 23.0 V."}
+    assert ("warning", "Voltage below 23.0 V", "/battery_state") in log.events
+    # 23.1 V is inside the 0.2 V hysteresis band: still a warning, no flapping.
+    feed_voltage(m, clock, 23.1)
+    assert m.evaluate()["voltage"]["level"] == "warn"
+    feed_voltage(m, clock, 24.9)
+    assert m.evaluate()["health"]["level"] == "ok"
+    assert log.msgs().count("Voltage below 23.0 V") == 1
+
+
+def test_min_voltage_from_env(monkeypatch):
+    from styri_bridge.config import Config
+    monkeypatch.delenv("STYRI_MIN_VOLTAGE", raising=False)
+    assert Config.from_env().min_voltage is None
+    monkeypatch.setenv("STYRI_MIN_VOLTAGE", "")
+    assert Config.from_env().min_voltage is None
+    monkeypatch.setenv("STYRI_MIN_VOLTAGE", "23.5")
+    assert Config.from_env().min_voltage == 23.5

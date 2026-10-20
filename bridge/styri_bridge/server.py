@@ -93,7 +93,8 @@ class BridgeServer:
         self.cfg = cfg
         self.audit = audit
         self.activity = Activity(audit, self.publish_threadsafe)
-        self.monitor = Monitor(self.activity, cfg.battery_topic, cfg.diagnostics_topic, cfg.stale_after)
+        self.monitor = Monitor(self.activity, cfg.battery_topic, cfg.diagnostics_topic, cfg.stale_after,
+                               min_voltage=cfg.min_voltage)
         self.static = StaticFiles(cfg.ui_dir)
         # Turns (type name, last raw message) into text for the Topics tab.
         # The ROS node installs a rosidl-based one; dict payloads need none.
@@ -185,6 +186,7 @@ class BridgeServer:
         session = Session(ws, client=peer_ip(ws))
         hello = {"type": "hello", "version": __version__, "robot": self.cfg.robot_name,
                  "domain": self.domain, "stale_after": self.cfg.stale_after, "controls": False,
+                 "min_voltage": self.cfg.min_voltage,
                  **self.hello_extra}
         await ws.send(json.dumps(hello))
         await ws.send(json.dumps({"type": "activity", "events": self.activity.recent()}))

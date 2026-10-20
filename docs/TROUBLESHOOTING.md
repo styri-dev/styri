@@ -31,6 +31,28 @@ Most first installs fail on one of these three.
 - **Firewall.** DDS uses UDP 7400 and up (by domain). Allow UDP between the
   robot and the machine running Styri.
 
+## Battery voltage
+
+**The voltage dropped but Styri still says OK.** That's the default: Styri
+shows the pack voltage but only judges the reported charge (warning below
+25 %). A pack can sag under load, or age, and still report plenty of charge.
+To be warned about that, set the lowest voltage you consider safe for your
+pack (not in v0.1.0; coming in the next release):
+
+```bash
+docker run -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.1.0
+```
+
+Below that, the Voltage tile turns amber, the status shows "Battery voltage
+low", and the Activity log records "Voltage below 23.0 V". The warning
+clears once the voltage is 0.2 V above the threshold, so it doesn't flicker
+on and off at the limit.
+
+**A low-voltage warning won't go away.** Check the robot's actual pack voltage
+(`ros2 topic echo /battery_state --field voltage`). If it's normal for your
+pack and still below the threshold, the threshold is set too high for it:
+lower `STYRI_MIN_VOLTAGE`, or unset it.
+
 ## A topic says "not readable"
 
 Its message type isn't installed in the image (common for a robot's own

@@ -77,6 +77,21 @@ ROS 2 nodes ──DDS──▶ Styri bridge ──local WebSocket──▶ Styri
 
 One container: a small bridge subscribes to your ROS 2 topics and serves a static web panel. Nothing leaves the machine except to browsers on your LAN.
 
+## Configuration
+
+Pass settings as environment variables, for example
+`docker run -e ROS_DOMAIN_ID=7 -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.1.0`.
+
+| Variable | Default | |
+|---|---|---|
+| `ROS_DOMAIN_ID` | `0` | Must match the robot |
+| `STYRI_ROBOT_NAME` | the host name | Shown in the header |
+| `STYRI_BATTERY_TOPIC` | `/battery_state` | A `sensor_msgs/BatteryState` topic |
+| `STYRI_DIAGNOSTICS_TOPIC` | `/diagnostics` | A `diagnostic_msgs/DiagnosticArray` topic |
+| `STYRI_MIN_VOLTAGE` | unset | Volts. Below this the Voltage tile turns amber and the status shows a low-voltage warning, whatever the charge reads. Unset, voltage is shown but never judged. Not in v0.1.0; coming in the next release. |
+
+All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). Something not showing up? See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
 ## Roadmap
 
 - **Controls** — software stop, hold-to-drive teleop and waypoint dispatch, with sign-in and roles. A software stop never replaces the robot's hardware E-stop.

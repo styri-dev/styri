@@ -90,7 +90,7 @@ export function Overview(props: {
           level={battery.level} badge={battery.level === "fault" ? "✕ CRITICAL" : "▲ LOW"} bar={battery.value}
           {...tileProps(battery, disc, discAge)} />
         <StatTile label="VOLTAGE" value={num(voltage.value, 2)} unit="V" source={voltage.source}
-          {...tileProps(voltage, disc, discAge)} />
+          level={voltage.level} badge="▲ LOW" {...tileProps(voltage, disc, discAge)} />
         <StatTile label="CPU TEMP" value={num(cpu_temp.value, 1)} unit="°C" source={cpu_temp.source}
           level={cpu_temp.level} badge={cpu_temp.level === "fault" ? "✕ HIGH" : "▲ HIGH"}
           {...tileProps(cpu_temp, disc, discAge)} />
