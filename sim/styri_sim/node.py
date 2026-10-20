@@ -9,6 +9,7 @@ import time
 import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -148,7 +149,10 @@ def send_fault(fault: str) -> None:
     if pub.get_subscription_count() == 0:
         raise SystemExit("sim robot not found on this ROS_DOMAIN_ID")
     pub.publish(String(data=fault))
-    rclpy.spin_once(node, timeout_sec=0.3)
+    # Reliable QoS: wait until the robot has acknowledged it, so exiting
+    # straight away can't drop the message (it did on slow CI machines).
+    if not pub.wait_for_all_acked(Duration(seconds=5)):
+        raise SystemExit("sim robot did not acknowledge the fault")
     node.destroy_node()
     rclpy.try_shutdown()
 
