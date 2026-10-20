@@ -5,16 +5,20 @@
 #
 # Needs: docker, vhs, ffmpeg, node, the JetBrains Mono font, port 8080 free and
 # nothing else on ROS_DOMAIN_ID 0. Run from the repo root:
-#   docs/media/make-hero.sh
+#   docs/media/make-hero.sh            the latest v* tag (what the README shows)
+#   docs/media/make-hero.sh v0.3.0     a specific, already published release
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
+version=${1:-$(git -C "$root" describe --tags --abbrev=0 --match 'v*')}
+image="ghcr.io/styri-dev/styri-core:$version"
+echo "recording $image"
 work=$(mktemp -d)
 trap 'docker rm -f styri robot >/dev/null 2>&1 || true; [ -n "${KEEP:-}" ] && echo "kept $work" || rm -rf "$work"' EXIT
 
-docker pull -q ghcr.io/styri-dev/styri-core:v0.2.0 >/dev/null
+docker pull -q "$image" >/dev/null || { echo "$image isn't published yet; wait for the release run" >&2; exit 1; }
 docker build -q -t styri-sim "$root/sim" >/dev/null
 (cd "$root/e2e" && npm ci --silent >/dev/null)
-cp "$root/docs/media/hero-terminal.tape" "$work/"
+sed "s|__VERSION__|$version|g" "$root/docs/media/hero-terminal.tape" > "$work/hero-terminal.tape"
 cp "$root/docs/media/hero-panel.mjs" "$root/e2e/.hero-panel.mjs"  # resolves @playwright/test from e2e/
 cd "$work"
 docker rm -f styri robot >/dev/null 2>&1 || true

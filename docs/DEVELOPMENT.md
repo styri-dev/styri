@@ -91,6 +91,8 @@ Pushes to `main` and tags publish the multi-arch image and then run the exact
 quickstart command on clean x86 and Arm runners, requiring live data within
 60 s. Tags release only if all of it passes.
 
+Releasing: see [RELEASING.md](RELEASING.md).
+
 ## UI without Docker
 
 Run the bridge with made-up data, then the Vite dev server, and open

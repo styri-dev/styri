@@ -1,4 +1,5 @@
-Output term.mp4  
+# Recorded by make-hero.sh, which fills in __VERSION__ from the latest release tag.
+Output term.mp4
 
 Set Shell "bash"
 Set FontFamily "JetBrains Mono"
@@ -21,7 +22,7 @@ Show
 Type "# Styri, on the robot's network"
 Sleep 300ms
 Enter
-Type "docker run --rm -d --name styri --network host ghcr.io/styri-dev/styri-core:v0.2.0 >/dev/null"
+Type "docker run --rm -d --name styri --network host ghcr.io/styri-dev/styri-core:__VERSION__ >/dev/null"
 Enter
 Sleep 2.6s
 Type "# start the robot"
