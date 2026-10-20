@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<!-- For a future ROS package index listing. Styri ships as a container today;
+     this describes the bridge's ROS dependencies for rosdep and the index. -->
+<package format="3">
+  <name>styri_bridge</name>
+  <version>0.1.0</version>
+  <description>
+    Styri Core: an offline ROS 2 web dashboard and read-only operator panel.
+    Discovers topics over DDS and serves a web panel on the LAN. Never
+    publishes to the robot.
+  </description>
+  <maintainer email="hello@styri.dev">Styri</maintainer>
+  <license>Apache-2.0</license>
+  <url type="website">https://styri.dev</url>
+  <url type="repository">https://github.com/styri-dev/styri</url>
+  <url type="bugtracker">https://github.com/styri-dev/styri/issues</url>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <!-- Needs websockets >= 13; Ubuntu's python3-websockets is older, so the
+       container installs it from PyPI at build time. -->
+  <exec_depend>python3-websockets</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

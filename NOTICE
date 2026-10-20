@@ -1,0 +1,10 @@
+Styri
+Copyright 2026 Styri
+
+This product includes software developed by Styri (https://styri.dev),
+licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The operator panel bundles these fonts, each under the SIL Open Font
+License, Version 1.1 (texts in ui/src/styles/fonts/):
+  Archivo          Copyright 2020 The Archivo Project Authors
+  JetBrains Mono   Copyright 2020 The JetBrains Mono Project Authors

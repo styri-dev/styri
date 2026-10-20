@@ -1,0 +1,43 @@
+# Styri against a simulated robot, no hardware needed.
+#
+#   docker compose up --build        then open http://localhost:8080
+#   docker compose exec sim /ros_entrypoint.sh python3 -m styri_sim fault battery:18
+#
+# Both use host networking, as on a real robot PC, so DDS discovery behaves
+# like production. Overrides used by CI:
+#   RMW_IMPLEMENTATION=rmw_cyclonedds_cpp   (both)
+#   SIM_RMW_IMPLEMENTATION=rmw_cyclonedds_cpp   (robot only)
+#   SIM_ROS_DISTRO=humble
+
+x-ros: &ros
+  network_mode: host
+  environment: &ros-env
+    ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-42}"
+    RMW_IMPLEMENTATION: "${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
+
+services:
+  sim:
+    <<: *ros
+    environment:
+      <<: *ros-env
+      # The robot can run a different DDS vendor from Styri.
+      RMW_IMPLEMENTATION: "${SIM_RMW_IMPLEMENTATION:-${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}}"
+    build:
+      context: sim
+      args:
+        ROS_DISTRO: "${SIM_ROS_DISTRO:-jazzy}"
+    image: "styri-sim:${SIM_ROS_DISTRO:-jazzy}"
+
+  styri:
+    <<: *ros
+    build: .
+    image: "${STYRI_IMAGE:-styri-core:dev}"
+    environment:
+      <<: *ros-env
+      STYRI_ROBOT_NAME: sim-01
+    volumes:
+      - styri-data:/var/lib/styri
+    depends_on: [sim]
+
+volumes:
+  styri-data:

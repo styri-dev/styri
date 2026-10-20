@@ -1,0 +1,8 @@
+:root {
+  --font-sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --fs-2xs: 11px; --fs-xs: 12px; --fs-sm: 13px; --fs-base: 15px; --fs-md: 17px;
+  --fs-lg: 20px; --fs-xl: 26px; --fs-2xl: 34px; --fs-3xl: 46px; --fs-4xl: 62px;
+  --lh-tight: 1.05; --lh-snug: 1.25; --lh-body: 1.55;
+  --tracking-label: 0.08em;
+}

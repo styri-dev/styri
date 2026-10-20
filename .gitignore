@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+build/
+dist/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+.pytest_cache/
+node_modules/
+.claude/
+e2e/test-results/
+e2e/playwright-report/

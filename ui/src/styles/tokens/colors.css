@@ -1,0 +1,74 @@
+:root {
+  /* Graphite neutrals (cool, low chroma) */
+  --g-950: oklch(0.145 0.006 250);
+  --g-900: oklch(0.180 0.007 250);
+  --g-850: oklch(0.210 0.008 250);
+  --g-800: oklch(0.250 0.009 250);
+  --g-700: oklch(0.330 0.010 250);
+  --g-600: oklch(0.450 0.012 250);
+  --g-500: oklch(0.560 0.012 250);
+  --g-400: oklch(0.680 0.010 250);
+  --g-300: oklch(0.800 0.008 250);
+  --g-200: oklch(0.890 0.006 250);
+  --g-100: oklch(0.950 0.004 250);
+  --g-50:  oklch(0.980 0.002 250);
+  --white: #fff;
+
+  /* Brand accent — "Signal". Buttons + links ONLY. */
+  --signal-300: oklch(0.82 0.10 230);
+  --signal-400: oklch(0.74 0.13 232);
+  --signal-500: oklch(0.68 0.15 236);
+  --signal-600: oklch(0.54 0.16 245);
+  --signal-700: oklch(0.46 0.15 248);
+
+  /* Safety states — never decorative (ISA-101: colour = abnormal) */
+  --stop-400: oklch(0.70 0.19 27);
+  --stop-500: oklch(0.60 0.22 27);
+  --stop-600: oklch(0.52 0.21 27);
+  --stop-900: oklch(0.26 0.09 27);
+  --caution-500: oklch(0.82 0.16 82);
+  --caution-900: oklch(0.30 0.07 82);
+  --ok-500: oklch(0.76 0.15 152);
+  --ok-900: oklch(0.28 0.06 152);
+  --ok-700: oklch(0.50 0.13 152);
+  --caution-700: oklch(0.52 0.12 70);
+
+  /* Semantic — dark (default product theme) */
+  --bg: var(--g-950);
+  --surface-1: var(--g-900);
+  --surface-2: var(--g-850);
+  --surface-3: var(--g-800);
+  --line: var(--g-800);
+  --line-strong: var(--g-700);
+  --text-1: var(--g-50);
+  --text-2: var(--g-300);
+  --text-3: var(--g-400);
+  --accent: var(--signal-500);
+  --accent-hover: var(--signal-400);
+  --accent-ink: var(--g-950);
+  --link: var(--signal-400);
+  --focus: var(--signal-300);
+  /* Status text on surfaces (AA on --surface-1) */
+  --ok-fg: var(--ok-500);
+  --warn-fg: var(--caution-500);
+  --fault-fg: var(--stop-400);
+}
+[data-theme="light"] {
+  --bg: var(--g-50);
+  --surface-1: var(--white);
+  --surface-2: var(--g-100);
+  --surface-3: var(--g-200);
+  --line: var(--g-200);
+  --line-strong: var(--g-400);
+  --text-1: var(--g-950);
+  --text-2: var(--g-700);
+  --text-3: var(--g-600);
+  --accent: var(--signal-600);
+  --accent-hover: var(--signal-700);
+  --accent-ink: var(--white);
+  --link: var(--signal-600);
+  --focus: var(--signal-500);
+  --ok-fg: var(--ok-700);
+  --warn-fg: var(--caution-700);
+  --fault-fg: var(--stop-600);
+}

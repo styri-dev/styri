@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "styri-bridge"
+version = "0.1.0"
+description = "Air-gapped ROS 2 to WebSocket bridge for the Styri operator panel"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+# rclpy and ROS message packages come from the ROS 2 distro, not PyPI.
+dependencies = ["websockets>=13,<18"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+styri-bridge = "styri_bridge.__main__:main"
+
+[tool.setuptools]
+packages = ["styri_bridge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

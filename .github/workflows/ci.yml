@@ -1,0 +1,247 @@
+name: CI
+
+# Every push and PR:
+#   unit        bridge + sim unit tests, UI build, bundle makes no external requests
+#   e2e         the Playwright suite against the real image and the simulated robot,
+#               on x86 and Arm, with Fast DDS and Cyclone DDS, a Humble robot, and a
+#               robot on a different DDS vendor. Each run also proves Styri is
+#               read-only (zero publishers/services) and sends nothing outside the
+#               LAN (no-egress guard, DNS included).
+# Pushes to main and v* tags also:
+#   image       build ghcr.io/styri-dev/styri-core natively per architecture, then
+#               publish one multi-arch tag
+#   quickstart  on a clean runner with only Docker, run the exact quickstart command
+#               and require live data at localhost:8080 within 60 s (x86 and Arm)
+# Tags release only when all of the above pass.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/styri-dev/styri-core
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12" # what ros:jazzy ships
+          cache: pip
+          cache-dependency-path: bridge/pyproject.toml
+      - run: pip install -e 'bridge[test]'
+      - run: pytest bridge
+      - run: pytest sim/tests
+        env:
+          PYTHONPATH: sim
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: ui
+      - name: Bundle makes no external requests
+        working-directory: ui
+        run: |
+          # Allowed: XML namespace names, React's error-docs link, and links an
+          # operator can click to our docs (never loaded by the page).
+          if grep -ohE 'https?://[^"'"'"' )`]+' dist/index.html dist/assets/* \
+              | grep -vE '^http://www\.w3\.org/|^https://react\.dev/errors|^https://github\.com/styri-dev/styri' ; then
+            echo "::error::Unexpected external URL in the UI bundle"; exit 1
+          fi
+
+  e2e:
+    name: e2e (${{ matrix.arch }}, styri ${{ matrix.rmw }}, robot ${{ matrix.robot }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86, runner: ubuntu-24.04, rmw: rmw_fastrtps_cpp, robot: jazzy fastrtps, distro: jazzy, sim_rmw: rmw_fastrtps_cpp }
+          - { arch: x86, runner: ubuntu-24.04, rmw: rmw_cyclonedds_cpp, robot: jazzy cyclonedds, distro: jazzy, sim_rmw: rmw_cyclonedds_cpp }
+          - { arch: arm64, runner: ubuntu-24.04-arm, rmw: rmw_fastrtps_cpp, robot: jazzy fastrtps, distro: jazzy, sim_rmw: rmw_fastrtps_cpp }
+          - { arch: arm64, runner: ubuntu-24.04-arm, rmw: rmw_cyclonedds_cpp, robot: jazzy cyclonedds, distro: jazzy, sim_rmw: rmw_cyclonedds_cpp }
+          - { arch: x86, runner: ubuntu-24.04, rmw: rmw_fastrtps_cpp, robot: humble fastrtps, distro: humble, sim_rmw: rmw_fastrtps_cpp }
+          - { arch: x86, runner: ubuntu-24.04, rmw: rmw_fastrtps_cpp, robot: jazzy cyclonedds, distro: jazzy, sim_rmw: rmw_cyclonedds_cpp }
+    env:
+      RMW_IMPLEMENTATION: ${{ matrix.rmw }}
+      SIM_RMW_IMPLEMENTATION: ${{ matrix.sim_rmw }}
+      SIM_ROS_DISTRO: ${{ matrix.distro }}
+      STYRI_IMAGE: styri-core:ci
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build Styri and the simulated robot
+        run: docker compose build
+      - name: Arm the no-egress guard
+        run: sudo ci/egress-guard.sh start "$STYRI_IMAGE"
+      - name: Start
+        run: |
+          docker compose up -d
+          curl -fsS --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/healthz
+      - name: Read-only guarantee (zero publishers, services, clients)
+        run: docker compose exec -T styri /ros_entrypoint.sh python3 - < ci/check_readonly.py
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Playwright
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test
+      - name: No egress
+        run: sudo ci/egress-guard.sh check
+      - name: Logs
+        if: failure()
+        run: docker compose logs --tail 200
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-${{ strategy.job-index }}
+          path: e2e/playwright-report
+          if-no-files-found: ignore
+
+  image:
+    if: github.event_name != 'pull_request'
+    needs: [unit]
+    name: image (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - { platform: linux/amd64, runner: ubuntu-24.04 }
+          - { platform: linux/arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.platform }},mode=max
+      - name: Save digest
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+
+  manifest:
+    needs: [image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=main,enable={{is_default_branch}}
+            type=sha
+      - name: Publish the multi-arch tag
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          mapfile -t tags < <(jq -r '.tags[] | "-t", .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          refs=()
+          for digest in *; do refs+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+          docker buildx imagetools inspect "$IMAGE:sha-${GITHUB_SHA::7}"
+      - id: tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "tag=$GITHUB_REF_NAME"; else echo "tag=sha-${GITHUB_SHA::7}"; fi >> "$GITHUB_OUTPUT"
+
+  quickstart:
+    needs: [manifest]
+    name: quickstart (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    env:
+      TAG: ${{ needs.manifest.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Make it a stranger's machine
+        run: |
+          docker logout ghcr.io || true
+          docker image prune -af >/dev/null
+      - name: The simulated robot
+        run: |
+          docker build -t styri-sim sim
+          docker run -d --rm --name robot --network host styri-sim
+      - name: The quickstart, exactly as documented (anonymous pull)
+        run: docker run -d --rm --name styri --network host "ghcr.io/styri-dev/styri-core:$TAG"
+      - name: Live data at localhost:8080 within 60 s
+        run: |
+          docker run --rm --network host -v "$PWD/ci:/ci:ro" --entrypoint python3 \
+            "ghcr.io/styri-dev/styri-core:$TAG" /ci/quickstart_check.py
+      - if: failure()
+        run: docker logs styri; docker logs robot
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [unit, e2e, quickstart]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          body: |
+            ```bash
+            docker run --rm --network host ghcr.io/styri-dev/styri-core:${{ github.ref_name }}
+            ```
+            Then open http://localhost:8080. Multi-arch: linux/amd64 and linux/arm64.
