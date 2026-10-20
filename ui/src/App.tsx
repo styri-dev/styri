@@ -80,18 +80,11 @@ export function App() {
           <span className="wordmark">styri</span>
         </div>
         <div className="header__rule" />
-        <div className="field">
-          <span className="microlabel">ROBOT</span>
-          <span className="mono field__value">{robot}</span>
-        </div>
-        <div className="field">
-          <span className="microlabel">BRIDGE</span>
-          <span className="field__conn">
-            <span className={`dot ${conn.cls}`} />
-            <span className={disc ? "warn-fg strong" : "strong"}>{conn.word}</span>
-            <span className="mono text-2">· {location.host}</span>
-          </span>
-        </div>
+        <span className="mono header__robot" title={`Robot: ${robot}`}>{robot}</span>
+        <span className={`field__conn ${disc ? "is-warn" : ""}`} title={`Bridge at ${location.host}`}>
+          <span className={`dot ${conn.cls}`} />
+          {conn.word}
+        </span>
         <div className="spacer" />
         <span className="chip">Local only · no account · no cloud</span>
         <span className="mono header__clock">{clock(new Date(now))}</span>
@@ -103,7 +96,7 @@ export function App() {
             aria-current={tab === key ? "page" : undefined}>
             {label}
             {key === "topics" && snap && <span className="tab__note">{snap.topics.length}</span>}
-            {key === "controls" && <span className="tab__note">SOON</span>}
+            {key === "controls" && <span className="tab__note tab__note--soon">SOON</span>}
           </a>
         ))}
       </nav>

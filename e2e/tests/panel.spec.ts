@@ -166,3 +166,31 @@ test.describe("at 768 px", () => {
     expect(await width(".preview__stop-wrap")).toBeGreaterThan(280);
   });
 });
+
+test.describe("on a phone (390 px)", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test("a warning fits: no sideways scroll, numbers inside their tiles, one-row header", async ({ page }) => {
+    fault("battery:18");
+    await expect(page.locator(".hero")).toHaveAttribute("data-health", "warn");
+    const m = await page.evaluate(() => ({
+      vw: document.documentElement.clientWidth,
+      scrollW: document.documentElement.scrollWidth,
+      heroRight: document.querySelector(".hero__word")!.getBoundingClientRect().right,
+      spill: [...document.querySelectorAll(".tile")].filter((t) => {
+        const v = t.querySelector(".tile__value") as HTMLElement;
+        return v.scrollWidth > v.clientWidth + 1;
+      }).map((t) => (t as HTMLElement).dataset.label),
+      badgeH: (document.querySelector(".badge") as HTMLElement).getBoundingClientRect().height,
+      headerH: document.querySelector(".header")!.getBoundingClientRect().height,
+      tabsFit: [...document.querySelectorAll(".tab")].every((t) => t.getBoundingClientRect().right <= document.documentElement.clientWidth),
+    }));
+    fault("battery:90");
+    expect(m.scrollW).toBe(m.vw);
+    expect(m.heroRight).toBeLessThanOrEqual(m.vw);
+    expect(m.spill).toEqual([]);
+    expect(m.badgeH).toBeLessThanOrEqual(30); // "▲ LOW" on one line
+    expect(m.headerH).toBeLessThanOrEqual(64);
+    expect(m.tabsFit).toBe(true);
+  });
+});
