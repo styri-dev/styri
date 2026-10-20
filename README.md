@@ -26,6 +26,8 @@ Open **http://localhost:8080**. Styri finds your robot's topics over DDS and sho
 
 Host networking lets Styri see DDS discovery on your LAN. Open source: [read the code](.) before you run it.
 
+**On a Mac?** Run Styri on the robot or any Linux machine on its network, and open the panel from any browser, Mac included. Docker on macOS can't see a robot on another machine, but `docker compose up` (below) gives you the full demo with a simulated robot.
+
 **No robot handy?** Run the simulated robot and the panel together:
 
 ```bash
