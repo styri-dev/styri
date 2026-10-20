@@ -131,7 +131,7 @@ WARN or ERROR.
 The panel talks to the bridge over one WebSocket at `/ws`. Server to client:
 
 ```jsonc
-{"type": "hello", "version": "0.1.0", "robot": "amr-01", "domain": "0", "stale_after": 5, "controls": false}
+{"type": "hello", "version": "0.2.0", "robot": "amr-01", "domain": "0", "stale_after": 5, "controls": false, "min_voltage": null}
 {"type": "activity", "events": [{"id": 12, "ts": 1792500000.1, "kind": "warning", "msg": "Battery below 25 %", "source": "/battery_state"}]}
 {"type": "event", "event": {…}}
 {"type": "snapshot", "health": {"level": "ok", "line": "All systems normal."}, "battery": {…}, "topics": [{"name": "/odom", "type": "nav_msgs/msg/Odometry", "hz": 20.0, "age": 0.04, "stale": false}], …}

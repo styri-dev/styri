@@ -7,7 +7,7 @@ Most first installs fail on one of these three.
 
 1. **`ROS_DOMAIN_ID`.** Styri only sees robots on the same domain. Check the
    robot (`echo $ROS_DOMAIN_ID`) and pass the same value:
-   `docker run -e ROS_DOMAIN_ID=7 --rm --network host ghcr.io/styri-dev/styri-core:v0.1.0`
+   `docker run -e ROS_DOMAIN_ID=7 --rm --network host ghcr.io/styri-dev/styri-core:v0.2.0`
 2. **`--network host`.** DDS discovery uses UDP multicast. Without host
    networking the container can't see the robot's nodes. (Docker Desktop on
    macOS and Windows runs containers in a VM, so host networking reaches the
@@ -37,10 +37,10 @@ Most first installs fail on one of these three.
 shows the pack voltage but only judges the reported charge (warning below
 25 %). A pack can sag under load, or age, and still report plenty of charge.
 To be warned about that, set the lowest voltage you consider safe for your
-pack (not in v0.1.0; coming in the next release):
+pack:
 
 ```bash
-docker run -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.1.0
+docker run -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.2.0
 ```
 
 Below that, the Voltage tile turns amber, the status shows "Battery voltage

@@ -11,7 +11,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d)
 trap 'docker rm -f styri robot >/dev/null 2>&1 || true; [ -n "${KEEP:-}" ] && echo "kept $work" || rm -rf "$work"' EXIT
 
-docker pull -q ghcr.io/styri-dev/styri-core:v0.1.0 >/dev/null
+docker pull -q ghcr.io/styri-dev/styri-core:v0.2.0 >/dev/null
 docker build -q -t styri-sim "$root/sim" >/dev/null
 (cd "$root/e2e" && npm ci --silent >/dev/null)
 cp "$root/docs/media/hero-terminal.tape" "$work/"

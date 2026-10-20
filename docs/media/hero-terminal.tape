@@ -21,7 +21,7 @@ Show
 Type "# Styri, on the robot's network"
 Sleep 300ms
 Enter
-Type "docker run --rm -d --name styri --network host ghcr.io/styri-dev/styri-core:v0.1.0 >/dev/null"
+Type "docker run --rm -d --name styri --network host ghcr.io/styri-dev/styri-core:v0.2.0 >/dev/null"
 Enter
 Sleep 2.6s
 Type "# start the robot"

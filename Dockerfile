@@ -1,7 +1,7 @@
 # Styri: one image, one port. The bridge serves the operator UI and its live
 # data on 8080.
 #
-#   docker run --rm --network host ghcr.io/styri-dev/styri-core:v0.1.0
+#   docker run --rm --network host ghcr.io/styri-dev/styri-core:v0.2.0
 #
 # ros:jazzy-ros-base is multi-arch (amd64 + arm64/Jetson) and already ships
 # rclpy and the standard message packages.

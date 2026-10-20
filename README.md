@@ -19,7 +19,7 @@ Open-source, offline-first operator panel for ROS 2 robots. Runs on the robot or
 Run it on any ROS 2 machine (Humble or Jazzy, amd64 or arm64):
 
 ```bash
-docker run --rm --network host ghcr.io/styri-dev/styri-core:v0.1.0
+docker run --rm --network host ghcr.io/styri-dev/styri-core:v0.2.0
 ```
 
 Open **http://localhost:8080**. Styri finds your robot's topics over DDS and shows them live.
@@ -80,7 +80,7 @@ One container: a small bridge subscribes to your ROS 2 topics and serves a stati
 ## Configuration
 
 Pass settings as environment variables, for example
-`docker run -e ROS_DOMAIN_ID=7 -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.1.0`.
+`docker run -e ROS_DOMAIN_ID=7 -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.2.0`.
 
 | Variable | Default | |
 |---|---|---|
@@ -88,7 +88,7 @@ Pass settings as environment variables, for example
 | `STYRI_ROBOT_NAME` | the host name | Shown in the header |
 | `STYRI_BATTERY_TOPIC` | `/battery_state` | A `sensor_msgs/BatteryState` topic |
 | `STYRI_DIAGNOSTICS_TOPIC` | `/diagnostics` | A `diagnostic_msgs/DiagnosticArray` topic |
-| `STYRI_MIN_VOLTAGE` | unset | Volts. Below this the Voltage tile turns amber and the status shows a low-voltage warning, whatever the charge reads. Unset, voltage is shown but never judged. Not in v0.1.0; coming in the next release. |
+| `STYRI_MIN_VOLTAGE` | unset | Volts. Below this the Voltage tile turns amber and the status shows a low-voltage warning, whatever the charge reads. Unset, voltage is shown but never judged. |
 
 All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). Something not showing up? See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 

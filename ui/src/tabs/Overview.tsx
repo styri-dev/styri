@@ -62,7 +62,7 @@ export function Overview(props: {
 }) {
   const { snap, hello, disc, discAge, noRobot, latencyMs } = props;
   if (!snap) return <p className="empty">Waiting for the bridge…</p>;
-  if (noRobot) return <NoRobot snap={snap} domain={hello?.domain ?? snap.domain} />;
+  if (noRobot) return <NoRobot snap={snap} domain={hello?.domain ?? snap.domain} version={hello?.version} />;
 
   const level: Health = disc ? "unknown" : snap.health.level;
   const lastKnown = HERO[snap.health.level].word;
@@ -104,7 +104,9 @@ export function Overview(props: {
   );
 }
 
-function NoRobot({ snap, domain }: { snap: Snapshot; domain: string }) {
+function NoRobot({ snap, domain, version }: { snap: Snapshot; domain: string; version?: string }) {
+  // The image this bridge came from, so the advice always matches what's running.
+  const image = `ghcr.io/styri-dev/styri-core${version ? `:v${version}` : ""}`;
   // Discovery runs every 2 s on the bridge; count down to the next pass.
   const [scanIn, setScanIn] = useState(2);
   useEffect(() => {
@@ -121,7 +123,7 @@ function NoRobot({ snap, domain }: { snap: Snapshot; domain: string }) {
     {
       title: "--network host",
       body: "DDS discovery uses UDP multicast. Without host networking the container can't see the robot's nodes.",
-      code: "docker run --network host … ghcr.io/styri-dev/styri",
+      code: `docker run --rm --network host ${image}`,
     },
     {
       title: "Topic names",
