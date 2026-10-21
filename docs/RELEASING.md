@@ -7,7 +7,7 @@ what a person does around it. Use the new version in place of `vX.Y.Z`.
 
 - [ ] CI is green on `main` (every e2e combination, both quickstarts).
 - [ ] The version is bumped everywhere it lives:
-      `bridge/pyproject.toml`, `bridge/styri_bridge/__init__.py`,
+      `bridge/setup.py`, `bridge/styri_bridge/__init__.py`,
       `bridge/package.xml`, `ui/package.json` (then
       `npm --prefix ui install --package-lock-only`).
 - [ ] The quickstart and examples name the new tag: `README.md`, `docs/`

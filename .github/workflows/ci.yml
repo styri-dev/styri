@@ -2,6 +2,7 @@ name: CI
 
 # Every push and PR:
 #   unit        bridge + sim unit tests, UI build, bundle makes no external requests
+#   colcon      styri_bridge builds as a ROS package on Humble and Jazzy (ROS index)
 #   e2e         the Playwright suite against the real image and the simulated robot,
 #               on x86 and Arm, with Fast DDS and Cyclone DDS, a Humble robot, and a
 #               robot on a different DDS vendor (and once more with
@@ -41,7 +42,7 @@ jobs:
         with:
           python-version: "3.12" # what ros:jazzy ships
           cache: pip
-          cache-dependency-path: bridge/pyproject.toml
+          cache-dependency-path: bridge/setup.py
       - run: pip install -e 'bridge[test]'
       - run: pytest bridge
       - run: pytest sim/tests
@@ -63,6 +64,25 @@ jobs:
               | grep -vE '^http://www\.w3\.org/|^https://react\.dev/errors|^https://github\.com/styri-dev/styri' ; then
             echo "::error::Unexpected external URL in the UI bundle"; exit 1
           fi
+
+  colcon:
+    # The ROS build farm builds styri_bridge this way for the ROS index.
+    name: colcon (${{ matrix.distro }})
+    strategy:
+      matrix:
+        distro: [humble, jazzy]
+    runs-on: ubuntu-24.04
+    container: ros:${{ matrix.distro }}-ros-base
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build and find the package
+        shell: bash
+        run: |
+          mkdir -p /ws/src && cp -r bridge /ws/src/styri_bridge && cd /ws
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          colcon build --packages-select styri_bridge --event-handlers console_cohesion+
+          source install/setup.bash
+          ros2 pkg executables styri_bridge | grep -x "styri_bridge styri-bridge"
 
   e2e:
     name: e2e (${{ matrix.arch }}, styri ${{ matrix.rmw }}, robot ${{ matrix.robot }})
@@ -242,7 +262,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [unit, e2e, quickstart]
+    needs: [unit, colcon, e2e, quickstart]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

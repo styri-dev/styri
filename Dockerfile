@@ -18,7 +18,8 @@ RUN npm run build
 FROM ros:jazzy-ros-base
 # All dependencies are resolved at build time; the running container never
 # reaches the network.
-COPY bridge/pyproject.toml /opt/styri/bridge/
+COPY bridge/pyproject.toml bridge/setup.py bridge/setup.cfg bridge/package.xml /opt/styri/bridge/
+COPY bridge/resource /opt/styri/bridge/resource
 COPY bridge/styri_bridge /opt/styri/bridge/styri_bridge
 # ros-base has no pip; install it just long enough to add our package.
 # Cyclone DDS ships alongside Fast DDS: set RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
