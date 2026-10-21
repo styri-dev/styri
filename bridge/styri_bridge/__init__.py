@@ -1,3 +1,3 @@
 """Styri ROS 2 <-> WebSocket bridge daemon."""
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
