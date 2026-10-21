@@ -1,0 +1,50 @@
+# Can anyone pull the published image, with no registry login? Run by hand
+# from the Actions tab after a release. Never logs in to ghcr.io.
+name: anonymous pull
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Image tag to check
+        default: v0.2.1
+        required: true
+
+permissions: {}
+
+jobs:
+  pull:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    name: pull (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    env:
+      IMAGE: ghcr.io/styri-dev/styri-core:${{ inputs.tag }}
+    steps:
+      - name: No registry credentials
+        run: |
+          docker logout ghcr.io || true
+          rm -f ~/.docker/config.json
+      - name: Platforms in the manifest
+        run: |
+          docker manifest inspect "$IMAGE" > manifest.json
+          jq -r '.manifests[] | "\(.platform.os)/\(.platform.architecture)"' manifest.json \
+            | grep -v '^unknown/' | sort | tee platforms.txt
+          {
+            echo "### $IMAGE"
+            echo "Platforms: $(paste -sd ' ' platforms.txt)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -qx linux/amd64 platforms.txt || { echo "::error::linux/amd64 missing"; exit 1; }
+          grep -qx linux/arm64 platforms.txt || { echo "::error::linux/arm64 missing"; exit 1; }
+      - name: Pull on this runner
+        run: |
+          docker pull "$IMAGE"
+          got=$(docker image inspect "$IMAGE" --format '{{.Os}}/{{.Architecture}}')
+          echo "Pulled $got on ${{ matrix.runner }}" | tee -a "$GITHUB_STEP_SUMMARY"
+          [ "$got" = "${{ matrix.platform }}" ]
