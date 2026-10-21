@@ -8,9 +8,9 @@
 
 **The ROS 2 web dashboard and operator panel that never leaves your network.**
 
-Open-source, offline-first operator panel for ROS 2 robots. Runs on the robot or a local box, works in any browser on the LAN. No cloud, no account, no outbound calls. One command to start.
+Built for the operators running robots on site, not a cloud dashboard miles away. Open-source ROS 2 operator panel that runs on the robot or any Linux box on its network and works in any browser on the LAN. Fully offline, free from the first robot. One command to start.
 
-[Website](https://styri.dev) · [Quickstart](#quickstart) · [How it compares](#how-styri-compares) · [Pricing](#editions)
+[Website](https://styri.dev) · [Quickstart](#quickstart) · [How it compares](#foxglove-in-the-lab-formant-in-the-cloud-styri-on-the-floor) · [Pricing](#editions)
 
 ---
 
@@ -57,17 +57,17 @@ sudo tcpdump -i any 'not net 10.0.0.0/8 and not net 172.16.0.0/12 and not net 19
 
 Nothing should appear while Styri runs. (DDS discovery uses LAN multicast, 224.0.0.0/4, which never leaves your network.)
 
-## How Styri compares
+## Foxglove in the lab. Formant in the cloud. Styri on the floor.
 
-| | RViz2 | Foxglove | Styri |
-|---|---|---|---|
-| Built for | Engineers | Engineers: data visualization and log analysis | Operators running robots on site |
-| Offline use | Fully local | Free and Pro: desktop app streams live local data, but account sign-in needs internet. Fully offline via standalone license or on-prem deployment on Enterprise | Fully offline on every tier, including free |
-| Runs in | Desktop / X11 on the robot or forwarded | Desktop app on each machine | Any browser on the LAN |
-| Offline install | apt or source build | Desktop install + offline license activation | One `docker run` command |
-| Source | Open source | Proprietary | Open-source core |
+| | RViz2 | Foxglove | Formant | Styri |
+|---|---|---|---|---|
+| Built for | Engineers | Engineers: data visualization and log analysis | Fleet operations teams, remotely from the cloud | Operators running robots on site |
+| Runs in | Desktop / X11 on the robot or forwarded | Desktop app on each machine | Cloud web app; self-hosted on your own servers for restricted sites | Any browser on the robot's local network |
+| Offline use | Fully local | Free and Pro: account sign-in needs internet. Fully offline via standalone license or on-prem deployment on Enterprise | Standard: agent streams to Formant's cloud; teleop needs Formant and Twilio servers. Air-gapped only via self-hosted on-prem deployment | Fully offline on every tier, including free |
+| Install | apt or source build | Desktop install + offline license activation | Agent on each robot (internet needed to install); on-prem means running Formant's servers | One `docker run` on the robot or any Linux box on its network |
+| Source | Open source | Proprietary | Proprietary | Open-source core |
 
-Foxglove helps engineers analyze robot data. Styri helps operators run robots — fully offline, from the free tier up.
+Foxglove helps engineers analyze robot data. Formant runs fleets from the cloud. Styri helps operators run robots on site — fully offline, from the free tier up.
 
 ## How it works
 
