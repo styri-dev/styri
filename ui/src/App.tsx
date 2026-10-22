@@ -32,12 +32,13 @@ export interface PanelTab {
   label: string;
   short?: string;
   first?: boolean; // before Overview
+  visible?: (state: BridgeState) => boolean; // e.g. only once the bridge says there's a fleet
   render: (ctx: PanelContext) => ReactNode;
 }
 
 export interface PanelPlugin {
   tabs?: PanelTab[];
-  defaultTab?: string;
+  defaultTab?: string; // used while that tab is visible
   hideOnPhones?: string[]; // tab keys
   header?: (ctx: PanelContext) => ReactNode; // in place of the robot name
   banner?: (ctx: PanelContext) => ReactNode; // under the tabs
@@ -71,14 +72,14 @@ export function Logo() {
 export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
   const { state, select, send, retryNow } = useBridge(URL);
   const now = useNow();
-  const extra = plugin.tabs ?? [];
+  const extra = (plugin.tabs ?? []).filter((t) => !t.visible || t.visible(state));
   const tabs: { key: string; label: string; short?: string }[] = [
     ...extra.filter((t) => t.first),
     ...TABS.map(([key, label]) => ({ key, label, short: SHORT[key] })),
     ...extra.filter((t) => !t.first),
   ];
   const keys = tabs.map((t) => t.key);
-  const fallback = plugin.defaultTab ?? "overview";
+  const fallback = plugin.defaultTab && keys.includes(plugin.defaultTab) ? plugin.defaultTab : "overview";
   const [tab, setTab] = useState(() => tabFromHash(keys, fallback));
   const [robot, setRobotIndex] = useState(0);
   const [theme] = useState(initialTheme);
@@ -88,6 +89,10 @@ export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
     const onHash = () => setTab(tabFromHash(keyList.split(","), fallback));
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
+  }, [keyList, fallback]);
+  // A tab that appears (or goes) once the bridge says hello: follow it unless the URL picked one.
+  useEffect(() => {
+    setTab(tabFromHash(keyList.split(","), fallback));
   }, [keyList, fallback]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;

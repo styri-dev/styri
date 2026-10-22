@@ -69,6 +69,9 @@ class StyriBridgeNode(Node):
         self._classes = {}
         # Only mapped topics are decoded; everything else is just counted.
         self._mapped = monitor.mapped_topics()
+        # A namespace (e.g. /amr2) to keep to, when several robots share a ROS
+        # domain: then only its topics and the mapped ones are discovered.
+        self.scope: str | None = None
         self.create_timer(DISCOVERY_PERIOD, self._discover)
         domain = monitor.robot.domain_id if monitor.robot.domain_id is not None \
             else os.environ.get("ROS_DOMAIN_ID", "0")
@@ -76,8 +79,10 @@ class StyriBridgeNode(Node):
                     os.environ.get("RMW_IMPLEMENTATION", "default"))
 
     def _discover(self) -> None:
+        scope = self.scope.rstrip("/") + "/" if self.scope else None
         graph = [(name, types[0]) for name, types in self.get_topic_names_and_types()
-                 if types and not _hidden(name)][:MAX_TOPICS]
+                 if types and not _hidden(name)
+                 and (scope is None or name.startswith(scope) or name in self._mapped)][:MAX_TOPICS]
         types = dict(graph)
         for name in self.monitor.discovered(graph, lambda t: _message_class(t) is not None):
             cls = _message_class(types[name])

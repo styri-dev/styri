@@ -30,19 +30,20 @@ PHYSICS_HZ = 50
 
 
 class SimNode(Node):
-    def __init__(self, robot: SimRobot):
-        super().__init__("styri_sim")
+    def __init__(self, robot: SimRobot, namespace: str | None = None):
+        # SIM_NAMESPACE=/amr2 puts every topic under /amr2, like a namespaced fleet robot.
+        super().__init__("styri_sim", namespace=namespace or os.environ.get("SIM_NAMESPACE") or None)
         self.robot = robot
         reliable = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=10)
 
-        self.create_subscription(Twist, "/cmd_vel", self._on_cmd_vel, reliable)
+        self.create_subscription(Twist, "cmd_vel", self._on_cmd_vel, reliable)
         self.create_subscription(String, FAULT_TOPIC, self._on_fault, reliable)
 
-        self._battery_pub = self.create_publisher(BatteryState, "/battery_state", reliable)
-        self._diag_pub = self.create_publisher(DiagnosticArray, "/diagnostics", reliable)
-        self._status_pub = self.create_publisher(String, "/robot_status", reliable)
-        self._odom_pub = self.create_publisher(Odometry, "/odom", reliable)
-        self._scan_pub = self.create_publisher(LaserScan, "/scan", reliable)
+        self._battery_pub = self.create_publisher(BatteryState, "battery_state", reliable)
+        self._diag_pub = self.create_publisher(DiagnosticArray, "diagnostics", reliable)
+        self._status_pub = self.create_publisher(String, "robot_status", reliable)
+        self._odom_pub = self.create_publisher(Odometry, "odom", reliable)
+        self._scan_pub = self.create_publisher(LaserScan, "scan", reliable)
 
         self._last = time.monotonic()
         self.create_timer(1 / PHYSICS_HZ, self._step)
@@ -187,9 +188,9 @@ def print_pose() -> None:
     import json
 
     rclpy.init()
-    node = Node("styri_sim_pose")
+    node = Node("styri_sim_pose", namespace=os.environ.get("SIM_NAMESPACE") or None)
     got: list[Odometry] = []
-    node.create_subscription(Odometry, "/odom", got.append, QoSProfile(
+    node.create_subscription(Odometry, "odom", got.append, QoSProfile(
         reliability=ReliabilityPolicy.RELIABLE, history=HistoryPolicy.KEEP_LAST, depth=1))
     deadline = time.monotonic() + 5
     while not got and time.monotonic() < deadline:

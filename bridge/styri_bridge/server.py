@@ -190,9 +190,11 @@ class BridgeServer:
         """Where the mapping came from, for the panel's Configuration view."""
         loaded, robot = self.cfg.mapping, self.cfg.robot
         notes = list(loaded.notes)
-        if len(loaded.robots) > 1:
+        if len(loaded.robots) > len(self.robots) == 1:
             notes.append(f"This file lists {len(loaded.robots)} robots. Styri Core shows the first, "
                          f"{robot.name}; Styri Pilot shows up to five.")
+        elif len(loaded.robots) > len(self.robots):
+            notes.append(f"This file lists {len(loaded.robots)} robots; the panel shows the first {len(self.robots)}.")
         return {"source": loaded.source, "error": loaded.error, "notes": notes,
                 "robots_in_file": len(loaded.robots), "namespace": robot.namespace or None,
                 "domain": self.domain, "stale_after": robot.stale_after, "host_fallback": robot.host_fallback}
