@@ -2,8 +2,9 @@
 
 ## "No robot topics found"
 
-The bridge is running but hasn't seen `/battery_state` or `/diagnostics`.
-Most first installs fail on one of these three.
+The bridge is running but hasn't seen any of the topics it maps (by default
+`/battery_state` and `/diagnostics`). Most first installs fail on one of these
+three.
 
 1. **`ROS_DOMAIN_ID`.** Styri only sees robots on the same domain. Check the
    robot (`echo $ROS_DOMAIN_ID`) and pass the same value:
@@ -15,9 +16,25 @@ Most first installs fail on one of these three.
    LAN either. For a robot on another machine, run Styri on Linux: the robot
    itself, a Linux box on the same network, or a Linux VM with bridged
    networking (for example UTM's "Bridged (Advanced)" mode).
-3. **Topic names.** Styri looks for `/battery_state` and `/diagnostics`. If your
-   robot uses other names (`ros2 topic list | grep -E "battery|diag"`), set
-   `STYRI_BATTERY_TOPIC` and `STYRI_DIAGNOSTICS_TOPIC`.
+3. **Topic names.** Without a mapping file Styri looks for `/battery_state` and
+   `/diagnostics`. If your robot uses other names
+   (`ros2 topic list | grep -E "battery|diag"`), map them in a `styri.yaml`
+   ([MAPPING.md](MAPPING.md)) and test it with `styri check`.
+
+## "Mapped values aren't coming through"
+
+The Overview banner and the Configuration tab say which mapping and why:
+
+- **Not found:** the topic isn't on the network. Check the name and the
+  namespace (relative names get `robot.namespace` in front); the close matches
+  listed are topics Styri can see.
+- **Can't read:** the topic is there but the field path doesn't fit its
+  message. The message lists the fields it does have; the Topics tab shows the
+  whole latest message.
+- **Waiting:** on the network, but nothing published yet.
+- **Configuration file not used:** the file has a mistake, so none of it
+  applies. The Configuration tab and `styri check` list every problem with the
+  key it's in.
 
 ## Topics appear but never get data
 

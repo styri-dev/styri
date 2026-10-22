@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { bridgeUrl, useBridge, useNow } from "./bridge";
 import { clock } from "./format";
 import { Activity } from "./tabs/Activity";
+import { Configuration } from "./tabs/Configuration";
 import { Controls } from "./tabs/Controls";
 import { Overview } from "./tabs/Overview";
 import { Topics } from "./tabs/Topics";
@@ -12,7 +13,10 @@ const TABS = [
   ["topics", "Topics"],
   ["activity", "Activity log"],
   ["controls", "Controls"],
+  ["configuration", "Configuration"],
 ] as const;
+// Shorter labels where the tab bar is narrow.
+const SHORT: Partial<Record<string, string>> = { activity: "Activity", configuration: "Config" };
 type Tab = (typeof TABS)[number][0];
 
 function tabFromHash(): Tab {
@@ -94,7 +98,10 @@ export function App() {
         {TABS.map(([key, label]) => (
           <a key={key} href={`#${key}`} className={`tab ${tab === key ? "tab--active" : ""}`}
             aria-current={tab === key ? "page" : undefined}>
-            {label}
+            <span className="tab__long">{label}</span>
+            {SHORT[key] && <span className="tab__short">{SHORT[key]}</span>}
+            {key === "configuration" && snap?.mappings?.some((m) => m.status === "missing" || m.status === "error") &&
+              <span className="tab__alert" aria-label="needs attention">▲</span>}
             {key === "topics" && snap && <span className="tab__note">{snap.topics.length}</span>}
             {key === "controls" && <span className="tab__note tab__note--soon">SOON</span>}
           </a>
@@ -119,6 +126,7 @@ export function App() {
         {tab === "topics" && <Topics snap={snap} disc={disc} discAge={discAge} message={state.message} select={select} />}
         {tab === "activity" && <Activity events={state.events} now={now} />}
         {tab === "controls" && <Controls snap={snap} history={state.history} />}
+        {tab === "configuration" && <Configuration snap={snap} hello={state.hello} />}
       </main>
     </div>
   );

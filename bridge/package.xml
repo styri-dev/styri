@@ -23,6 +23,7 @@
   <!-- Needs websockets >= 13; Ubuntu's python3-websockets is older, so the
        container installs it from PyPI at build time. -->
   <exec_depend>python3-websockets</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 

@@ -36,6 +36,8 @@ services:
       <<: *ros-env
       STYRI_ROBOT_NAME: sim-01
       STYRI_MIN_VOLTAGE: "${STYRI_MIN_VOLTAGE:-}"
+      # A mapping file, e.g. /opt/styri/presets/styri-sim.yaml (shipped in the image)
+      STYRI_CONFIG: ${STYRI_CONFIG:-}
     volumes:
       - styri-data:/var/lib/styri
     depends_on: [sim]

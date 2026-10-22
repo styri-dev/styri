@@ -5,8 +5,16 @@ export function ageText(seconds: number): string {
   return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.floor(s / 60)} min ago` : `${Math.floor(s / 3600)} h ago`;
 }
 
-export function num(value: number | null | undefined, digits: number): string {
-  return value == null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
+export function num(value: unknown, digits: number): string {
+  return typeof value !== "number" || !Number.isFinite(value) ? "—" : value.toFixed(digits);
+}
+
+/** A mapped value as text: numbers to sensible digits, true/false, or the text itself. */
+export function shown(value: unknown, kind: string): string {
+  if (value == null) return "—";
+  if (kind === "bool") return value ? "true" : "false";
+  if (typeof value === "number") return num(value, Math.abs(value) >= 100 ? 0 : Math.abs(value) >= 10 ? 1 : 2);
+  return String(value);
 }
 
 /** Time for a log row: HH:MM:SS today, with the date for older rows. */

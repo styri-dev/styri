@@ -1,4 +1,4 @@
-"""Entry point: python -m styri_bridge [--fake]"""
+"""Entry point: styri [--fake] | styri check [styri.yaml]  (or python -m styri_bridge …)"""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import logging
 import signal
+import sys
 
 from . import extensions, system
 from .audit import AuditLog
@@ -15,8 +16,8 @@ from .server import BridgeServer
 logger = logging.getLogger("styri_bridge")
 
 
-async def _main(fake: bool) -> None:
-    cfg = Config.from_env()
+async def _main(fake: bool, config_file: str | None = None) -> None:
+    cfg = Config.from_env(config_file)
     audit = AuditLog(cfg.audit_db)
     server = BridgeServer(cfg, audit)
     loaded = extensions.load(server)
@@ -55,14 +56,20 @@ async def _main(fake: bool) -> None:
         audit.close()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(prog="styri-bridge")
+def main(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["check"]:
+        from . import check
+        sys.exit(check.main(argv[1:]))
+    parser = argparse.ArgumentParser(prog="styri", epilog="styri check [styri.yaml]: test a mapping file "
+                                     "against the live robot")
     parser.add_argument("--fake", action="store_true", help="simulate a robot instead of using ROS 2")
-    args = parser.parse_args()
+    parser.add_argument("--config", help="mapping file (default: STYRI_CONFIG or /etc/styri/styri.yaml)")
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     # websockets logs every connection, including each /healthz probe.
     logging.getLogger("websockets").setLevel(logging.WARNING)
-    asyncio.run(_main(args.fake))
+    asyncio.run(_main(args.fake, args.config))
 
 
 if __name__ == "__main__":

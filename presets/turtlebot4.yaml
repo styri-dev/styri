@@ -1,0 +1,41 @@
+# TurtleBot 4 (real robot, or the Nav2 / Gazebo simulation). Topic names below
+# are the TurtleBot 4 defaults; if you launched it with a namespace, set it
+# under robot. Check against your robot with:  styri check turtlebot4.yaml
+robot:
+  name: turtlebot4
+  namespace: ""              # e.g. /robot1 for a namespaced TurtleBot 4
+
+battery:
+  topic: battery_state       # sensor_msgs/BatteryState, percentage 0-1
+  percentage: percentage
+  percentage_scale: 100
+  voltage: voltage
+  warn_below: 20             # TurtleBot 4 docks itself at low charge; warn a little early
+  fault_below: 10
+
+cpu_temperature:
+  # The TurtleBot 4 doesn't publish its Raspberry Pi temperature by default.
+  # If Styri runs on the robot itself, its own sensor is the Pi's:
+  topic: host
+  warn_above: 75
+  fault_above: 85
+
+diagnostics:
+  topic: /diagnostics
+
+fields:
+  - label: Speed
+    topic: odom              # nav_msgs/Odometry
+    field: twist.twist.linear.x
+    unit: m/s
+    stale_after: 3
+  - label: Battery temperature
+    topic: battery_state
+    field: temperature
+    unit: °C
+    warn_above: 45
+  # Docked or not needs irobot_create_msgs installed next to Styri:
+  # - label: Docked
+  #   topic: dock_status
+  #   field: is_docked
+  #   kind: bool

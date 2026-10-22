@@ -1,0 +1,37 @@
+# The simulated robot that ships with Styri (docker compose up). Shows every
+# kind of mapping: battery, CPU from diagnostics, the robot's own status and
+# custom number, text and true/false fields.
+robot:
+  name: sim-01
+
+battery:
+  topic: /battery_state
+  percentage: percentage
+  percentage_scale: 100
+  voltage: voltage
+
+cpu_temperature:
+  topic: /diagnostics
+  status_name: cpu_monitor
+  key: temperature
+
+status:
+  topic: /robot_status       # std_msgs/String: IDLE, MOVING or LOW_BATTERY
+  field: data
+  warn: [LOW_BATTERY]
+
+fields:
+  - label: Speed
+    topic: /odom
+    field: twist.twist.linear.x
+    unit: m/s
+  - label: Battery temperature
+    topic: /battery_state
+    field: temperature
+    unit: °C
+    warn_above: 45
+  - label: Battery present
+    topic: /battery_state
+    field: present
+    kind: bool
+    fault: [false]

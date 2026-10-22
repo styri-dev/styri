@@ -13,12 +13,13 @@ setup(
         (f"share/{package_name}", ["package.xml"]),
     ],
     # rclpy and ROS message packages come from the ROS 2 distro, not PyPI.
-    install_requires=["websockets>=13,<18"],
+    install_requires=["websockets>=13,<18", "PyYAML>=5.4"],
     extras_require={"test": ["pytest>=8"]},
     zip_safe=True,
     maintainer="Styri",
     maintainer_email="hello@styri.dev",
     description="Styri Core: an offline ROS 2 web dashboard and read-only operator panel.",
     license="Apache-2.0",
-    entry_points={"console_scripts": ["styri-bridge = styri_bridge.__main__:main"]},
+    entry_points={"console_scripts": ["styri = styri_bridge.__main__:main",
+                                      "styri-bridge = styri_bridge.__main__:main"]},
 )

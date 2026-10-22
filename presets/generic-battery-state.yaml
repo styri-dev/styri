@@ -1,0 +1,27 @@
+# A robot that publishes sensor_msgs/BatteryState and diagnostic_msgs/DiagnosticArray
+# under the usual names. This is what Styri does with no file at all, written
+# out so you can change it. Check it against the robot with:
+#   styri check generic-battery-state.yaml
+robot:
+  name: amr-01
+  namespace: ""              # e.g. /robot1 if every topic starts with /robot1/
+
+battery:
+  topic: battery_state       # relative names get the namespace
+  percentage: percentage     # BatteryState sends 0-1 ...
+  percentage_scale: 100      # ... so multiply by 100 for %
+  voltage: voltage
+  warn_below: 25             # %
+  fault_below: 10
+  # min_voltage: 23.0        # volts: warn when the pack sags, whatever the % says
+
+cpu_temperature:
+  topic: /diagnostics        # the DiagnosticArray entry whose name contains "cpu",
+  status_name: cpu           # and its key containing "temp"
+  key: temp
+  warn_above: 75             # °C
+  fault_above: 85
+  host_fallback: false       # true: show the Styri machine's own CPU instead, labelled as such
+
+diagnostics:
+  topic: /diagnostics        # WARN and ERROR entries show on the Overview

@@ -11,15 +11,53 @@ export interface Hello {
   domain: string;
   stale_after: number;
   controls: boolean;
-  min_voltage: number | null; // STYRI_MIN_VOLTAGE, if set
+  min_voltage: number | null; // battery.min_voltage / STYRI_MIN_VOLTAGE, if set
+  config?: ConfigSummary;
 }
 
+/** Where the topic mapping came from (hello.config). */
+export interface ConfigSummary {
+  source: string; // the styri.yaml path, or "environment"
+  error: string | null; // the file couldn't be used; environment defaults apply
+  notes: string[];
+  robots_in_file: number;
+  namespace: string | null;
+  domain: string;
+  stale_after: number;
+  host_fallback: boolean;
+}
+
+export type ValueKind = "number" | "text" | "bool";
+
 export interface Tile {
-  value: number | null;
+  value: number | string | boolean | null;
   age: number | null;
-  source: string;
+  source: string | null;
   level: Level;
   stale: boolean;
+  label: string | null; // e.g. "CPU temp", or "Styri host CPU" when that's the source
+  unit: string;
+  kind: ValueKind;
+  mapped: boolean; // false when the mapping turns this tile off
+  key?: string;
+}
+
+export type MappingStatus = "ok" | "waiting" | "missing" | "error" | "stale";
+
+/** One mapping and whether it works, for the banner and the Configuration view. */
+export interface MappingRow {
+  key: string;
+  label: string;
+  topic: string | null; // null: the Styri machine's own sensor
+  where: string; // "topic · field path", readable
+  status: MappingStatus;
+  detail: string;
+  suggestions: string[];
+  type?: string | null;
+  value?: number | string | boolean | null;
+  unit?: string;
+  kind?: ValueKind;
+  stale_after?: number;
 }
 
 export interface TopicRow {
@@ -39,6 +77,9 @@ export interface Snapshot {
   battery: Tile;
   voltage: Tile;
   cpu_temp: Tile;
+  status: Tile | null; // the robot's own status, when mapped
+  fields: Tile[]; // custom fields, up to 5
+  mappings: MappingRow[];
   last_message: { age: number | null; topic: string | null };
   topics: TopicRow[];
   seen: string[];
@@ -129,7 +170,7 @@ export function useBridge(url: string) {
           case "snapshot":
             setState((s) => ({
               ...s, snapshot: msg, snapshotAt: Date.now(),
-              history: { cpuTemp: push(s.history.cpuTemp, msg.cpu_temp?.value), load: push(s.history.load, msg.host?.load_pct) },
+              history: { cpuTemp: push(s.history.cpuTemp, typeof msg.cpu_temp?.value === "number" ? msg.cpu_temp.value : null), load: push(s.history.load, msg.host?.load_pct) },
             }));
             break;
           case "activity": // full history on (re)connect, newest first

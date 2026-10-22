@@ -93,13 +93,13 @@ class BridgeServer:
         self.cfg = cfg
         self.audit = audit
         self.activity = Activity(audit, self.publish_threadsafe)
-        self.monitor = Monitor(self.activity, cfg.battery_topic, cfg.diagnostics_topic, cfg.stale_after,
-                               min_voltage=cfg.min_voltage)
+        self.monitor = Monitor(self.activity, cfg.robot)
         self.static = StaticFiles(cfg.ui_dir)
         # Turns (type name, last raw message) into text for the Topics tab.
         # The ROS node installs a rosidl-based one; dict payloads need none.
         self.decode = None
-        self.domain = os.environ.get("ROS_DOMAIN_ID", "0")
+        self.domain = str(cfg.robot.domain_id) if cfg.robot.domain_id is not None \
+            else os.environ.get("ROS_DOMAIN_ID", "0")
         self.clients: set[ServerConnection] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._snapshot: dict | None = None
@@ -141,6 +141,12 @@ class BridgeServer:
             if not self.static.available():
                 logger.warning("No UI build at %s; only the WebSocket is served", self.cfg.ui_dir)
             self.activity.add("state", f"styri v{__version__} started", "styri-bridge")
+            if self.cfg.mapping.error:
+                logger.error("Configuration %s not used: %s", self.cfg.mapping.source, self.cfg.mapping.error)
+                self.activity.add("warning", f"Configuration file not used: {self.cfg.mapping.error}",
+                                  "configuration")
+            else:
+                logger.info("Topic mapping from %s", self.cfg.mapping.source)
             tasks = [asyncio.create_task(self._snapshots())] + [asyncio.create_task(f()) for f in self.background]
             try:
                 await stop
@@ -149,6 +155,17 @@ class BridgeServer:
                     task.cancel()
                 for hook in self.on_shutdown:
                     hook()
+
+    def config_summary(self) -> dict:
+        """Where the mapping came from, for the panel's Configuration view."""
+        loaded, robot = self.cfg.mapping, self.cfg.robot
+        notes = list(loaded.notes)
+        if len(loaded.robots) > 1:
+            notes.append(f"This file lists {len(loaded.robots)} robots. Styri Core shows the first, "
+                         f"{robot.name}; Styri Pilot shows up to five.")
+        return {"source": loaded.source, "error": loaded.error, "notes": notes,
+                "robots_in_file": len(loaded.robots), "namespace": robot.namespace or None,
+                "domain": self.domain, "stale_after": robot.stale_after, "host_fallback": robot.host_fallback}
 
     def snapshot(self) -> dict:
         snap = self.monitor.evaluate()
@@ -186,7 +203,7 @@ class BridgeServer:
         session = Session(ws, client=peer_ip(ws))
         hello = {"type": "hello", "version": __version__, "robot": self.cfg.robot_name,
                  "domain": self.domain, "stale_after": self.cfg.stale_after, "controls": False,
-                 "min_voltage": self.cfg.min_voltage,
+                 "min_voltage": self.cfg.min_voltage, "config": self.config_summary(),
                  **self.hello_extra}
         await ws.send(json.dumps(hello))
         await ws.send(json.dumps({"type": "activity", "events": self.activity.recent()}))

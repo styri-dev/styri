@@ -1,8 +1,9 @@
 """What the operator sees: topic rates and ages, robot health, activity.
 
 No ROS imports. The ROS node (or the fake robot) feeds it messages; the
-server asks it for a snapshot once a second and it reports state changes
-to the activity log as they happen.
+mapping (mapping.py) says which topics and fields become which tiles. The
+server asks for a snapshot once a second and state changes go to the
+activity log as they happen.
 """
 
 from __future__ import annotations
@@ -11,27 +12,21 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
+
+from .mapping import RobotMap, Rule, Value, convert, diag_lookup, extract, suggest
+from .mapping import from_env as mapping_from_env
 
 # Topics every ROS 2 graph has; they say nothing about the robot.
 INFRA_TOPICS = {"/rosout", "/parameter_events"}
 
 RATE_WINDOW = 5.0  # seconds of history used for the Hz figure
-VOLTAGE_HYSTERESIS = 0.2  # V above STYRI_MIN_VOLTAGE before a low-voltage warning clears
 NO_ROBOT_GRACE = 30.0  # seconds before "no robot topics" is logged
+MISSING_GRACE = 6.0  # seconds of discovery before a mapped topic counts as missing
 
 
 class Activity(Protocol):
     def add(self, kind: str, msg: str, source: str) -> None: ...
-
-
-@dataclass
-class Thresholds:
-    battery_warn: float = 25.0  # %
-    battery_fault: float = 10.0
-    cpu_warn: float = 75.0  # °C
-    cpu_fault: float = 85.0
-    hysteresis: float = 2.0  # must recover this far past a limit to clear
 
 
 @dataclass
@@ -60,55 +55,92 @@ class TopicState:
 
 @dataclass
 class Reading:
-    value: float | None
+    value: Any
     at: float | None
     source: str
 
 
-def _level(value: float | None, warn: float, fault: float, prev: str, hyst: float, low_is_bad: bool) -> str:
-    if value is None:
-        return "ok"
-    v = -value if low_is_bad else value
-    w, f = (-warn, -fault) if low_is_bad else (warn, fault)
-    if v >= f:
+def _side(v: float, warn: float | None, fault: float | None, prev: str, hyst: float, low_is_bad: bool) -> str:
+    """Level for one bound direction, with hysteresis so it doesn't flap."""
+    sign = -1 if low_is_bad else 1
+    x = sign * v
+    if fault is not None and x >= sign * fault:
         return "fault"
-    if v >= w:
+    if warn is not None and x >= sign * warn:
         return "warn"
     # Hysteresis: stay in warn until clearly back to normal.
-    if prev != "ok" and v >= w - hyst:
-        return "warn"
+    edge = warn if warn is not None else fault
+    if prev != "ok" and edge is not None and x >= sign * edge - hyst:
+        return "warn" if warn is not None else "fault"
     return "ok"
 
 
+def judge(value: Any, kind: str, rule: Rule, prev: str) -> tuple[str, str | None]:
+    """(level, direction) for a value under its rule; direction is high, low or None."""
+    if value is None or not rule.judged():
+        return "ok", None
+    if kind == "number":
+        hi = _side(value, rule.warn_above, rule.fault_above, prev, rule.hysteresis, low_is_bad=False)
+        lo = _side(value, rule.warn_below, rule.fault_below, prev, rule.hysteresis, low_is_bad=True)
+        rank = {"ok": 0, "warn": 1, "fault": 2}
+        if hi != "ok" and rank[hi] >= rank[lo]:
+            return hi, "high"
+        return (lo, "low") if lo != "ok" else ("ok", None)
+
+    def hit(values):
+        if kind == "bool":
+            return value in values
+        return str(value).strip().lower() in {str(x).strip().lower() for x in values}
+    if hit(rule.fault):
+        return "fault", None
+    if hit(rule.warn):
+        return "warn", None
+    return "ok", None  # unlisted values are shown as they are
+
+
+def _num(v: float, unit: str) -> str:
+    text = f"{v:.2f}".rstrip("0").rstrip(".") if abs(v) < 1000 else f"{v:.0f}"
+    return f"{text} {unit}".strip()
+
+
+def _level_int(level: Any) -> int:
+    if isinstance(level, (bytes, bytearray)):
+        return int.from_bytes(level, "little")
+    return int(level)
+
+
 class Monitor:
-    def __init__(self, activity: Activity, battery_topic: str, diagnostics_topic: str,
-                 stale_after: float = 5.0, thresholds: Thresholds | None = None,
-                 min_voltage: float | None = None, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, activity: Activity, robot: RobotMap | None = None,
+                 clock: Callable[[], float] = time.monotonic):
         self.activity = activity
-        self.battery_topic = battery_topic
-        self.diagnostics_topic = diagnostics_topic
-        self.stale_after = stale_after
-        self.th = thresholds or Thresholds()
-        # Optional: warn when the pack voltage drops below this, whatever the
-        # reported charge says (a sagging pack can still claim plenty left).
-        self.min_voltage = min_voltage
+        self.robot = robot or mapping_from_env()
         self.clock = clock
         self.started = clock()
         self._lock = threading.Lock()
         self.topics: dict[str, TopicState] = {}
-        self.battery = Reading(None, None, battery_topic)
-        self.voltage = Reading(None, None, battery_topic)
-        self.cpu = Reading(None, None, "host")
+        self.values = {v.key: v for v in self.robot.values}
+        self.readings: dict[str, Reading] = {v.key: Reading(None, None, v.topic or "host") for v in self.robot.values}
+        self.errors: dict[str, str] = {}  # value key -> why the last message couldn't be read
         self.host_cpu = Reading(None, None, "host")
         self.host_load: float | None = None  # % of all cores, 1-minute average
         self.diag: dict[str, tuple[int, str]] = {}  # status name -> (level, message)
         self.diag_at: float | None = None
+        self._by_topic: dict[str, list[Value]] = {}
+        for v in self.robot.values:
+            if v.topic:
+                self._by_topic.setdefault(v.topic, []).append(v)
         # Remembered levels, for transitions.
-        self._levels = {"battery": "ok", "cpu": "ok", "voltage": "ok"}
+        self._levels: dict[str, str] = {k: "ok" for k in self.values}
         self._diag_levels: dict[str, int] = {}
         self._overall = None
         self._graph_announced = False
         self._no_robot_logged = False
+        self._missing_logged: set[str] = set()
+        self._error_logged: set[str] = set()
+
+    def mapped_topics(self) -> set[str]:
+        """Topics whose messages need decoding (the rest are only counted)."""
+        return self.robot.topics()
 
     # ---- inputs (any thread) -------------------------------------------
 
@@ -133,27 +165,33 @@ class Monitor:
             t.count += 1
             t.raw = raw
 
-    def battery_state(self, percentage: float | None, voltage: float | None, now: float | None = None) -> None:
-        """percentage in 0..100 (already converted), None when unknown."""
+    def mapped(self, name: str, msg: Any, now: float | None = None) -> None:
+        """A decoded message (a ROS message, or a dict from the fake robot) on a mapped topic."""
         now = self.clock() if now is None else now
+        statuses = None
+        if name == self.robot.diagnostics_topic:
+            try:
+                statuses = [(str(extract(s, "name")), _level_int(extract(s, "level")), str(extract(s, "message")))
+                            for s in extract(msg, "status")]
+            except (LookupError, TypeError, ValueError):
+                statuses = None
         with self._lock:
-            self.battery = Reading(percentage, now, self.battery_topic)
-            self.voltage = Reading(voltage, now, self.battery_topic)
-
-    def diagnostics(self, statuses: list[tuple[str, int, str, dict[str, str]]], now: float | None = None) -> None:
-        """(name, level, message, values) per DiagnosticStatus."""
-        now = self.clock() if now is None else now
-        with self._lock:
-            for name, level, message, values in statuses:
-                self.diag[name] = (level, message)
-                if "cpu" in name.lower():
-                    for key, value in values.items():
-                        if "temp" in key.lower():
-                            try:
-                                self.cpu = Reading(float(value), now, self.diagnostics_topic)
-                            except ValueError:
-                                pass
-            self.diag_at = now
+            for v in self._by_topic.get(name, ()):
+                try:
+                    raw = diag_lookup(msg, v.diag_status, v.diag_key) if v.diag_status is not None \
+                        else extract(msg, v.field)
+                    value = convert(raw, v.kind)
+                    if v.kind == "number" and value is not None:
+                        value *= v.scale
+                except (LookupError, TypeError, ValueError) as exc:
+                    self.errors[v.key] = str(exc)
+                    continue
+                self.errors.pop(v.key, None)
+                self.readings[v.key] = Reading(value, now, name)
+            if statuses is not None:
+                for status_name, level, text in statuses:
+                    self.diag[status_name] = (level, text)
+                self.diag_at = now
 
     def host_vitals(self, cpu_temperature: float | None, load_pct: float | None = None,
                     now: float | None = None) -> None:
@@ -164,19 +202,23 @@ class Monitor:
 
     # ---- derived state ------------------------------------------------------
 
-    def _cpu_reading(self, now: float) -> Reading:
-        # Prefer the robot's own /diagnostics figure while it is fresh.
-        if self.cpu.value is not None and self.cpu.at is not None and now - self.cpu.at <= self.stale_after:
-            return self.cpu
-        if self.host_cpu.value is not None:
-            return self.host_cpu
-        return self.cpu
+    @staticmethod
+    def _stale(r: Reading, now: float, after: float) -> bool:
+        return r.at is not None and now - r.at > after
 
-    def _stale(self, r: Reading, now: float) -> bool:
-        return r.at is not None and now - r.at > self.stale_after
+    def _reading(self, v: Value, now: float) -> tuple[Reading, str]:
+        """The reading behind a tile, and the label to show with it."""
+        if v.topic is None:  # cpu_temperature: {topic: host}
+            return self.host_cpu, "Styri host CPU"
+        r = self.readings[v.key]
+        # Only when the file asks for it (host_fallback: true), and labelled as such.
+        if v.key == "cpu_temp" and self.robot.host_fallback and self.host_cpu.value is not None \
+                and (r.value is None or self._stale(r, now, v.stale_after)):
+            return self.host_cpu, "Styri host CPU"
+        return r, v.label
 
     def robot_found(self) -> bool:
-        return self.battery_topic in self.topics or self.diagnostics_topic in self.topics
+        return any(t in self.topics for t in self.mapped_topics())
 
     def evaluate(self, now: float | None = None) -> dict:
         """Snapshot for the UI, logging any state changes on the way."""
@@ -186,61 +228,46 @@ class Monitor:
         return snap
 
     def _evaluate(self, now: float) -> dict:
-        th = self.th
-        cpu = self._cpu_reading(now)
-        bat_stale, cpu_stale = self._stale(self.battery, now), self._stale(cpu, now)
-
-        bat_level = "ok" if bat_stale else _level(self.battery.value, th.battery_warn, th.battery_fault,
-                                                  self._levels["battery"], th.hysteresis, low_is_bad=True)
-        cpu_level = "ok" if cpu_stale else _level(cpu.value, th.cpu_warn, th.cpu_fault,
-                                                  self._levels["cpu"], th.hysteresis, low_is_bad=False)
-        self._transition("battery", bat_level,
-                         {"warn": f"Battery below {th.battery_warn:.0f} %", "fault": f"Battery below {th.battery_fault:.0f} %"},
-                         self.battery_topic)
-        volt_level = "ok"
-        v = self.voltage.value
-        if self.min_voltage is not None and v is not None and not bat_stale:
-            recovering = self._levels["voltage"] != "ok" and v < self.min_voltage + VOLTAGE_HYSTERESIS
-            volt_level = "warn" if v < self.min_voltage or recovering else "ok"
-        self._transition("voltage", volt_level, {"warn": f"Voltage below {self.min_voltage or 0:.1f} V"},
-                         self.battery_topic)
-        self._transition("cpu", cpu_level,
-                         {"warn": f"CPU temperature above {th.cpu_warn:.0f} °C", "fault": f"CPU temperature above {th.cpu_fault:.0f} °C"},
-                         cpu.source)
+        tiles: dict[str, dict] = {}
+        reasons: list[tuple[str, str]] = []
+        robot_readings: list[tuple[Reading, float]] = []
+        for v in self.robot.values:
+            r, label = self._reading(v, now)
+            stale = self._stale(r, now, v.stale_after)
+            level, direction = ("ok", None) if stale else judge(r.value, v.kind, v.rule, self._levels[v.key])
+            self._transition(v, level, direction, r.source, r.value)
+            self._levels[v.key] = level
+            if r.source != "host" and r.at is not None:
+                robot_readings.append((r, v.stale_after))
+            if level != "ok":
+                reasons.append((level, self._reason(v, r.value, level, direction)))
+            tiles[v.key] = {"value": r.value, "age": None if r.at is None else round(now - r.at, 1),
+                            "source": r.source, "level": level, "stale": stale, "label": label,
+                            "unit": v.unit, "kind": v.kind, "mapped": True}
 
         # Diagnostics: 0 OK, 1 WARN, 2 ERROR, 3 STALE.
-        diag_stale = self.diag_at is not None and now - self.diag_at > self.stale_after
-        diag_reasons = []
+        diag_stale = self.diag_at is not None and now - self.diag_at > self.robot.stale_after
+        cpu = self.values.get("cpu_temp")
+        cpu_entry = cpu.diag_status.lower() if cpu and cpu.diag_status else None
+        cpu_hot = tiles.get("cpu_temp", {}).get("level", "ok") != "ok"
         for name, (level, message) in sorted(self.diag.items()):
             prev = self._diag_levels.get(name, 0)
             # The CPU tile already speaks for a hot CPU; don't say it twice.
-            if cpu_level != "ok" and "cpu" in name.lower():
+            if cpu_hot and cpu_entry and cpu_entry in name.lower():
                 self._diag_levels[name] = level
                 continue
             if level in (1, 2) and level > prev:
                 self.activity.add("warning", f"{name}: {message or ('error' if level == 2 else 'warning')}",
-                                  self.diagnostics_topic)
+                                  self.robot.diagnostics_topic)
             elif level == 0 and prev in (1, 2):
-                self.activity.add("state", f"{name} back to OK", self.diagnostics_topic)
+                self.activity.add("state", f"{name} back to OK", self.robot.diagnostics_topic)
             self._diag_levels[name] = level
             if not diag_stale and level in (1, 2):
-                diag_reasons.append(("fault" if level == 2 else "warn", f"{name} reports {message or 'a problem'}."))
+                reasons.append(("fault" if level == 2 else "warn", f"{name} reports {message or 'a problem'}."))
 
-        reasons = []
-        if bat_level != "ok":
-            pct = self.battery.value or 0
-            reasons.append((bat_level, f"Battery critical — {pct:.0f} %. Dock the robot now." if bat_level == "fault"
-                            else f"Battery low — {pct:.0f} %. Send to dock soon."))
-        if volt_level != "ok":
-            reasons.append((volt_level, f"Battery voltage low — {v:.2f} V, below {self.min_voltage:.1f} V."))
-        if cpu_level != "ok":
-            reasons.append((cpu_level, f"CPU temperature high — {cpu.value:.1f} °C."))
-        reasons += diag_reasons
-
-        tracked = [r for r in (self.battery, cpu) if r.at is not None]
-        all_stale = bool(tracked) and all(self._stale(r, now) for r in tracked)
+        all_stale = bool(robot_readings) and all(self._stale(r, now, after) for r, after in robot_readings)
         if all_stale:
-            last = max(r.at for r in tracked)
+            last = max(r.at for r, _ in robot_readings)
             overall, line = "unknown", f"No data from the robot for {now - last:.0f} s."
         elif any(level == "fault" for level, _ in reasons):
             overall = "fault"
@@ -250,8 +277,10 @@ class Monitor:
             line = " ".join(text for _, text in reasons)
         else:
             overall = "ok"
-            stale_names = [n for n, s in (("battery", bat_stale), ("CPU temp", cpu_stale)) if s]
+            stale_names = [{"battery": "battery", "cpu_temp": "CPU temp"}.get(k, t["label"])
+                           for k, t in tiles.items() if t["stale"] and k != "voltage"]
             line = (f"Robot healthy. One value is stale — see {stale_names[0]}." if len(stale_names) == 1
+                    else f"Robot healthy. {len(stale_names)} values are stale." if stale_names
                     else "All systems normal.")
 
         names = {"ok": "OK", "warn": "WARNING", "fault": "FAULT", "unknown": "NO DATA"}
@@ -261,16 +290,22 @@ class Monitor:
 
         topics = self._topic_rows(now)
         self._graph_events(now, len(topics))
+        mappings = self._mapping_rows(now, tiles)
 
         robot_topics = [t for t in self.topics.values() if t.name not in INFRA_TOPICS and t.last is not None]
         newest = max(robot_topics, key=lambda t: t.last, default=None)
+        empty = {"value": None, "age": None, "source": None, "level": "ok", "stale": False, "label": None,
+                 "unit": "", "kind": "number", "mapped": False}
 
         return {
             "robot_found": self.robot_found(),
             "health": {"level": overall, "line": line},
-            "battery": self._tile(self.battery, now, bat_level, bat_stale),
-            "voltage": self._tile(self.voltage, now, volt_level, bat_stale),
-            "cpu_temp": self._tile(cpu, now, cpu_level, cpu_stale),
+            "battery": tiles.get("battery", empty),
+            "voltage": tiles.get("voltage", empty),
+            "cpu_temp": tiles.get("cpu_temp", empty),
+            "status": tiles.get("status"),
+            "fields": [tiles[k] | {"key": k} for k in tiles if k.startswith("field")],
+            "mappings": mappings,
             "last_message": {"age": None if newest is None else round(now - newest.last, 2),
                              "topic": None if newest is None else newest.name},
             "topics": topics,
@@ -279,21 +314,97 @@ class Monitor:
         }
 
     @staticmethod
-    def _tile(r: Reading, now: float, level: str, stale: bool) -> dict:
-        return {"value": r.value, "age": None if r.at is None else round(now - r.at, 1),
-                "source": r.source, "level": level, "stale": stale}
+    def _reason(v: Value, value: Any, level: str, direction: str | None) -> str:
+        if v.key == "battery":
+            return f"Battery critical — {value:.0f} %. Dock the robot now." if level == "fault" \
+                else f"Battery low — {value:.0f} %. Send to dock soon."
+        if v.key == "voltage":
+            return f"Battery voltage low — {value:.2f} V, below {v.rule.warn_below:.1f} V."
+        if v.key == "cpu_temp":
+            return f"CPU temperature high — {value:.1f} °C."
+        if v.kind == "number":
+            return f"{v.label} {direction or 'out of range'} — {_num(value, v.unit)}."
+        shown = ("true" if value else "false") if v.kind == "bool" else value
+        return f"{v.label} reports {shown}."
 
-    def _transition(self, key: str, level: str, messages: dict[str, str], source: str) -> None:
-        prev = self._levels[key]
-        if level != prev and level != "ok" and (prev == "ok" or level == "fault"):
-            self.activity.add("warning", messages[level], source)
-        self._levels[key] = level
+    def _transition(self, v: Value, level: str, direction: str | None, source: str, value: Any) -> None:
+        prev = self._levels[v.key]
+        if level == prev or level == "ok" or not (prev == "ok" or level == "fault"):
+            return
+        r = v.rule
+        if v.key == "battery":
+            msg = f"Battery below {(r.fault_below if level == 'fault' else r.warn_below):.0f} %"
+        elif v.key == "voltage":
+            msg = f"Voltage below {r.warn_below:.1f} V"
+        elif v.key == "cpu_temp":
+            msg = f"CPU temperature above {(r.fault_above if level == 'fault' else r.warn_above):.0f} °C"
+        elif v.kind == "number":
+            bound = {("high", "warn"): r.warn_above, ("high", "fault"): r.fault_above,
+                     ("low", "warn"): r.warn_below, ("low", "fault"): r.fault_below}.get((direction, level))
+            word = "above" if direction == "high" else "below"
+            msg = f"{v.label} {word} {_num(bound, v.unit)}" if bound is not None else f"{v.label} out of range"
+        else:
+            msg = f"{v.label}: {('true' if value else 'false') if v.kind == 'bool' else value}"
+        self.activity.add("warning", msg, source)
+
+    def _mapping_rows(self, now: float, tiles: dict[str, dict]) -> list[dict]:
+        """Each mapping and whether it's working, for the banner and the Configuration view."""
+        seen = sorted(self.topics)
+        entries = [(v.key, v.label, v.topic, v.describe(), v) for v in self.robot.values]
+        if self.robot.diagnostics_topic:
+            entries.append(("diagnostics", "Diagnostics", self.robot.diagnostics_topic,
+                            f"{self.robot.diagnostics_topic} · status levels", None))
+        rows = []
+        for key, label, topic, where, v in entries:
+            row = {"key": key, "label": label, "topic": topic, "where": where, "suggestions": [],
+                   "status": "ok", "detail": ""}
+            t = self.topics.get(topic) if topic else None
+            if topic is None:
+                ok = self.host_cpu.value is not None
+                row.update(status="ok" if ok else "missing",
+                           detail="Reading the Styri machine's own sensor." if ok
+                           else "The Styri machine reports no CPU temperature sensor.")
+            elif t is None:
+                if now - self.started < MISSING_GRACE:
+                    row.update(status="waiting", detail="Looking for it on the network…")
+                else:
+                    row["suggestions"] = suggest(topic, seen)
+                    row.update(status="missing", detail="Not on the network.")
+                    if topic not in self._missing_logged:
+                        self._missing_logged.add(topic)
+                        hint = f" Did you mean {row['suggestions'][0]}?" if row["suggestions"] else ""
+                        self.activity.add("warning", f"Mapped topic {topic} not found.{hint}", "configuration")
+            elif not t.supported:
+                row.update(status="error", detail=f"Its type, {t.type}, isn't installed here, so Styri can't read it.")
+            elif v is not None and key in self.errors and (tiles[key]["age"] is None or tiles[key]["stale"]):
+                row.update(status="error", detail=f"Can't read the value: {self.errors[key]}.")
+                if key not in self._error_logged:
+                    self._error_logged.add(key)
+                    self.activity.add("warning", f"{label}: can't read {where} — {self.errors[key]}", "configuration")
+            elif v is None:
+                stale = t.last is not None and now - t.last > self.robot.stale_after
+                row.update(status="waiting" if t.last is None else "stale" if stale else "ok",
+                           detail="On the network, no messages yet." if t.last is None else "")
+            elif tiles[key]["age"] is None:
+                row.update(status="waiting", detail="On the network, no messages yet.")
+            elif tiles[key]["stale"]:
+                row.update(status="stale", detail=f"No update for {tiles[key]['age']:.0f} s "
+                                                  f"(stale after {v.stale_after:g} s).")
+            if row["status"] == "ok":
+                self._missing_logged.discard(topic)
+            if row["status"] != "error":
+                self._error_logged.discard(key)
+            if v is not None:
+                row.update(type=t.type if t else None, value=tiles[key]["value"], unit=v.unit, kind=v.kind,
+                           stale_after=v.stale_after)
+            rows.append(row)
+        return rows
 
     def _topic_rows(self, now: float) -> list[dict]:
         rows = []
         for t in sorted(self.topics.values(), key=lambda t: t.name):
             age = None if t.last is None else now - t.last
-            stale = t.active() and age is not None and age > self.stale_after
+            stale = t.active() and age is not None and age > self.robot.stale_after
             if stale and t.stale_since is None:
                 t.stale_since = t.last
                 self.activity.add("warning", f"{t.name} stopped publishing", t.name)

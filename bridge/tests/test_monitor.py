@@ -1,3 +1,4 @@
+from styri_bridge.mapping import from_env
 from styri_bridge.monitor import NO_ROBOT_GRACE, Monitor
 
 
@@ -20,9 +21,20 @@ class Clock:
         return self.t
 
 
-def make():
+def battery_msg(pct, volts=24.5):
+    return {"percentage": pct / 100, "voltage": volts}
+
+
+def diag(*entries):
+    """(name, level, message, {key: value}) per DiagnosticStatus."""
+    return {"status": [{"name": n, "level": lvl, "message": msg, "values": [{"key": k, "value": v}
+                                                                            for k, v in vals.items()]}
+                       for n, lvl, msg, vals in entries]}
+
+
+def make(env=None):
     log, clock = Log(), Clock()
-    m = Monitor(log, "/battery_state", "/diagnostics", stale_after=5.0, clock=clock)
+    m = Monitor(log, from_env(env or {}), clock=clock)
     m.discovered([("/battery_state", "sensor_msgs/msg/BatteryState"),
                   ("/diagnostics", "diagnostic_msgs/msg/DiagnosticArray"),
                   ("/odom", "nav_msgs/msg/Odometry"), ("/rosout", "rcl_interfaces/msg/Log")], lambda t: True)
@@ -34,8 +46,8 @@ def feed(m, clock, battery=76.0, cpu=58.0, seconds=1, hz=10):
         clock.t += 1 / hz
         m.message("/odom", b"x")
         m.message("/battery_state", b"x")
-        m.battery_state(battery, 24.5)
-        m.diagnostics([("cpu_monitor", 0, "OK", {"temperature": str(cpu)})])
+        m.mapped("/battery_state", battery_msg(battery))
+        m.mapped("/diagnostics", diag(("cpu_monitor", 0, "OK", {"temperature": str(cpu)})))
 
 
 def test_ok_snapshot_and_rates():
@@ -72,27 +84,39 @@ def test_battery_warn_fault_and_hysteresis():
     assert log.msgs().count("Battery below 25 %") == 1
 
 
-def test_cpu_temperature_and_host_fallback():
+def test_cpu_temperature_and_no_silent_host_fallback():
     m, log, clock = make()
     feed(m, clock, cpu=78)
     snap = m.evaluate()
     assert snap["health"]["line"] == "CPU temperature high — 78.0 °C."
     assert ("warning", "CPU temperature above 75 °C", "/diagnostics") in log.events
-    # Without /diagnostics updates, the host's own sensor takes over.
+    assert snap["cpu_temp"]["label"] == "CPU temp"
+    # Without /diagnostics updates the tile goes stale; the host's sensor is not swapped in.
     m.host_vitals(50.0)
     clock.t += 10
     snap = m.evaluate()
+    assert snap["cpu_temp"]["source"] == "/diagnostics" and snap["cpu_temp"]["stale"]
+
+
+def test_host_fallback_is_opt_in_and_labelled():
+    m, log, clock = make({"STYRI_CPU_HOST_FALLBACK": "true"})
+    feed(m, clock)
+    m.host_vitals(50.0)
+    clock.t += 10
+    m.host_vitals(50.0)
+    snap = m.evaluate()
     assert snap["cpu_temp"]["source"] == "host" and snap["cpu_temp"]["value"] == 50.0
+    assert snap["cpu_temp"]["label"] == "Styri host CPU" and not snap["cpu_temp"]["stale"]
 
 
 def test_diagnostics_error_is_a_fault():
     m, log, clock = make()
     feed(m, clock)
-    m.diagnostics([("motor_right", 2, "Overcurrent", {})])
+    m.mapped("/diagnostics", diag(("motor_right", 2, "Overcurrent", {})))
     snap = m.evaluate()
     assert snap["health"] == {"level": "fault", "line": "motor_right reports Overcurrent."}
     assert ("warning", "motor_right: Overcurrent", "/diagnostics") in log.events
-    m.diagnostics([("motor_right", 0, "OK", {})])
+    m.mapped("/diagnostics", diag(("motor_right", 0, "OK", {})))
     assert m.evaluate()["health"]["level"] == "ok"
     assert "motor_right back to OK" in log.msgs()
 
@@ -114,7 +138,7 @@ def test_stale_topic_and_no_data():
 
 def test_no_robot_topics():
     log, clock = Log(), Clock()
-    m = Monitor(log, "/battery_state", "/diagnostics", clock=clock)
+    m = Monitor(log, from_env({}), clock=clock)
     m.discovered([("/rosout", "rcl_interfaces/msg/Log")], lambda t: True)
     snap = m.evaluate()
     assert not snap["robot_found"] and snap["seen"] == ["/rosout"]
@@ -127,7 +151,7 @@ def test_no_robot_topics():
 def test_hot_cpu_is_reported_once():
     m, log, clock = make()
     feed(m, clock, cpu=78)
-    m.diagnostics([("cpu_monitor", 1, "High temperature", {"temperature": "78"})])
+    m.mapped("/diagnostics", diag(("cpu_monitor", 1, "High temperature", {"temperature": "78"})))
     snap = m.evaluate()
     assert snap["health"]["line"] == "CPU temperature high — 78.0 °C."
     assert not any("cpu_monitor" in msg for msg in log.msgs())
@@ -135,7 +159,8 @@ def test_hot_cpu_is_reported_once():
 
 def make_with_min_voltage(min_voltage):
     log, clock = Log(), Clock()
-    m = Monitor(log, "/battery_state", "/diagnostics", min_voltage=min_voltage, clock=clock)
+    env = {} if min_voltage is None else {"STYRI_MIN_VOLTAGE": str(min_voltage)}
+    m = Monitor(log, from_env(env), clock=clock)
     m.discovered([("/battery_state", "sensor_msgs/msg/BatteryState")], lambda t: True)
     return m, log, clock
 
@@ -144,7 +169,7 @@ def feed_voltage(m, clock, volts, battery=90.0, seconds=1):
     for _ in range(seconds * 10):
         clock.t += 0.1
         m.message("/battery_state", b"x")
-        m.battery_state(battery, volts)
+        m.mapped("/battery_state", {"percentage": battery / 100, "voltage": volts})
         m.host_vitals(50.0)
 
 
@@ -179,6 +204,7 @@ def test_below_min_voltage_warns_until_clearly_recovered():
 
 def test_min_voltage_from_env(monkeypatch):
     from styri_bridge.config import Config
+    monkeypatch.delenv("STYRI_CONFIG", raising=False)
     monkeypatch.delenv("STYRI_MIN_VOLTAGE", raising=False)
     assert Config.from_env().min_voltage is None
     monkeypatch.setenv("STYRI_MIN_VOLTAGE", "")

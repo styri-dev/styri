@@ -6,7 +6,7 @@ name: CI
 #   e2e         the Playwright suite against the real image and the simulated robot,
 #               on x86 and Arm, with Fast DDS and Cyclone DDS, a Humble robot, and a
 #               robot on a different DDS vendor (and once more with
-#               STYRI_MIN_VOLTAGE set). Each run also proves Styri is
+#               STYRI_MIN_VOLTAGE set, and with a mapping file). Each run also proves Styri is
 #               read-only (zero publishers/services) and sends nothing outside the
 #               LAN (no-egress guard, DNS included).
 # Pushes to main and v* tags also:
@@ -134,6 +134,28 @@ jobs:
           docker compose up -d styri
           curl -fsS --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/healthz
           npx playwright test voltage
+      - name: styri check, against the live sim
+        run: |
+          docker compose -f compose.yaml -f e2e/compose.mapping.yaml up -d styri
+          curl -fsS --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/healthz
+          run() { docker compose exec -T styri /ros_entrypoint.sh styri check "$@"; }
+          run /opt/styri/presets/styri-sim.yaml
+          set +e; run /etc/styri/fixtures/broken.yaml; code=$?; set -e
+          [ "$code" = 1 ] || { echo "styri check should fail the broken file with exit 1, got $code"; exit 1; }
+          # The check's own node is read-only too.
+          run --seconds 25 /opt/styri/presets/styri-sim.yaml > /dev/null &
+          docker compose exec -T -e READONLY_NODE=styri_check styri /ros_entrypoint.sh python3 - < ci/check_readonly.py
+          wait
+      - name: Playwright with a mapping file (preset, then a broken one)
+        working-directory: e2e
+        run: |
+          for mode in preset broken; do
+            file=$([ "$mode" = preset ] && echo /opt/styri/presets/styri-sim.yaml || echo /etc/styri/fixtures/broken.yaml)
+            STYRI_CONFIG=$file docker compose -f ../compose.yaml -f compose.mapping.yaml up -d styri
+            curl -fsS --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/healthz
+            E2E_CONFIG=$mode npx playwright test mapping
+          done
+          docker compose exec -T styri /ros_entrypoint.sh python3 - < ../ci/check_readonly.py
       - name: No egress
         run: sudo ci/egress-guard.sh check
       - name: Logs

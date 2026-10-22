@@ -1,0 +1,7 @@
+# For the mapping e2e tests: the e2e fixtures inside the Styri container.
+#   STYRI_CONFIG=/etc/styri/fixtures/broken.yaml \
+#     docker compose -f compose.yaml -f e2e/compose.mapping.yaml up -d styri
+services:
+  styri:
+    volumes:
+      - ./e2e/fixtures:/etc/styri/fixtures:ro

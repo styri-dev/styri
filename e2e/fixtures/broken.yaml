@@ -1,0 +1,11 @@
+# For the e2e tests: the sim, mapped with two mistakes Styri must explain.
+robot:
+  name: sim-01
+status:
+  topic: /robot_state        # wrong: the sim publishes /robot_status
+  field: data
+fields:
+  - label: Speed
+    topic: /odom
+    field: twist.linear.x    # wrong: Odometry nests it as twist.twist.linear.x
+    unit: m/s

@@ -21,6 +21,8 @@ FROM ros:jazzy-ros-base
 COPY bridge/pyproject.toml bridge/setup.py bridge/setup.cfg bridge/package.xml /opt/styri/bridge/
 COPY bridge/resource /opt/styri/bridge/resource
 COPY bridge/styri_bridge /opt/styri/bridge/styri_bridge
+# Example mapping files: -e STYRI_CONFIG=/opt/styri/presets/turtlebot4.yaml
+COPY presets /opt/styri/presets
 # ros-base has no pip; install it just long enough to add our package.
 # Cyclone DDS ships alongside Fast DDS: set RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 # to match a robot that uses it.
@@ -30,7 +32,8 @@ RUN apt-get update \
  && apt-get purge -y --auto-remove python3-pip \
  && rm -rf /var/lib/apt/lists/* \
  && . /opt/ros/jazzy/setup.sh \
- && python3 -c "import styri_bridge, websockets, rosidl_runtime_py, diagnostic_msgs" \
+ && python3 -c "import styri_bridge, websockets, yaml, rosidl_runtime_py, diagnostic_msgs" \
+ && command -v styri \
  && useradd --system --uid 10001 --home-dir /var/lib/styri --create-home styri
 COPY --from=ui /src/dist /opt/styri/ui
 

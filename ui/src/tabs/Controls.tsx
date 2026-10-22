@@ -25,7 +25,7 @@ function Spark({ values, h, lo, hi, strong }: { values: number[]; h: number; lo:
 // A preview of the planned control panel. Styri Core is read-only: this tab
 // renders no live controls and sends nothing to the robot.
 export function Controls({ snap, history }: { snap?: Snapshot; history: { cpuTemp: number[]; load: number[] } }) {
-  const bat = snap?.battery.value ?? null;
+  const bat = typeof snap?.battery.value === "number" ? snap.battery.value : null;
   return (
     <>
       <div className="soon" role="status">

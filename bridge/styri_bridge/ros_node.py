@@ -9,7 +9,6 @@ graph shows Styri with zero publishers and zero services.
 from __future__ import annotations
 
 import logging
-import math
 import os
 import threading
 
@@ -30,13 +29,6 @@ logger = logging.getLogger("styri_bridge")
 NODE_NAME = "styri_bridge"
 DISCOVERY_PERIOD = 2.0  # seconds
 MAX_TOPICS = 300  # a safety cap for very large graphs
-BATTERY_TYPE = "sensor_msgs/msg/BatteryState"
-DIAGNOSTICS_TYPE = "diagnostic_msgs/msg/DiagnosticArray"
-
-
-def _finite(value: float) -> float | None:
-    """BatteryState uses NaN for 'unknown'."""
-    return value if math.isfinite(value) else None
 
 
 def _hidden(name: str) -> bool:
@@ -57,8 +49,8 @@ def decode(type_name: str, raw: bytes) -> str:
 
 
 class StyriBridgeNode(Node):
-    def __init__(self, cfg: Config, monitor: Monitor):
-        super().__init__(NODE_NAME, enable_rosout=False, start_parameter_services=False,
+    def __init__(self, cfg: Config, monitor: Monitor, name: str = NODE_NAME, context=None):
+        super().__init__(name, context=context, enable_rosout=False, start_parameter_services=False,
                          # Jazzy's type-description service: harmless, but Core offers no services at all.
                          parameter_overrides=[Parameter("start_type_description_service", value=False)])
         # rclpy always creates a /parameter_events publisher; Styri sets no
@@ -74,10 +66,13 @@ class StyriBridgeNode(Node):
         # frames costs nothing; we only decode what someone looks at.
         self._qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=5)
         self._subs = {}
-        self._battery_cls = _message_class(BATTERY_TYPE)
-        self._diag_cls = _message_class(DIAGNOSTICS_TYPE)
+        self._classes = {}
+        # Only mapped topics are decoded; everything else is just counted.
+        self._mapped = monitor.mapped_topics()
         self.create_timer(DISCOVERY_PERIOD, self._discover)
-        logger.info("ROS 2 node online (ROS_DOMAIN_ID=%s, RMW=%s)", os.environ.get("ROS_DOMAIN_ID", "0"),
+        domain = monitor.robot.domain_id if monitor.robot.domain_id is not None \
+            else os.environ.get("ROS_DOMAIN_ID", "0")
+        logger.info("ROS 2 node online (ROS_DOMAIN_ID=%s, RMW=%s)", domain,
                     os.environ.get("RMW_IMPLEMENTATION", "default"))
 
     def _discover(self) -> None:
@@ -89,33 +84,29 @@ class StyriBridgeNode(Node):
             if cls is None:
                 logger.info("Topic %s has type %s, which is not installed here", name, types[name])
                 continue
+            self._classes[name] = cls
             self._subs[name] = self.create_subscription(
                 cls, name, lambda raw, n=name, t=types[name]: self._on_raw(n, t, raw), self._qos, raw=True)
 
     def _on_raw(self, name: str, type_name: str, raw: bytes) -> None:
         self.monitor.message(name, raw)
+        if name not in self._mapped:
+            return
         try:
-            if name == self.cfg.battery_topic and type_name == BATTERY_TYPE:
-                msg = deserialize_message(raw, self._battery_cls)
-                pct = _finite(msg.percentage)
-                self.monitor.battery_state(None if pct is None else pct * 100, _finite(msg.voltage))
-            elif name == self.cfg.diagnostics_topic and type_name == DIAGNOSTICS_TYPE:
-                msg = deserialize_message(raw, self._diag_cls)
-                self.monitor.diagnostics([
-                    (s.name, int.from_bytes(s.level, "little") if isinstance(s.level, bytes) else int(s.level),
-                     s.message, {kv.key: kv.value for kv in s.values})
-                    for s in msg.status])
+            self.monitor.mapped(name, deserialize_message(raw, self._classes[name]))
         except Exception:  # a malformed message must not take the bridge down
             logger.exception("Could not read %s", name)
 
 
 class RosRuntime:
-    """Owns rclpy init/shutdown and the background spin thread."""
+    """Owns one rclpy context (one ROS domain), its node and a spin thread."""
 
-    def __init__(self, cfg: Config, monitor: Monitor):
-        rclpy.init()
-        self.node = StyriBridgeNode(cfg, monitor)
-        self._executor = SingleThreadedExecutor()
+    def __init__(self, cfg: Config, monitor: Monitor, name: str = NODE_NAME):
+        # A domain_id in the mapping file wins over ROS_DOMAIN_ID.
+        self.context = rclpy.Context()
+        rclpy.init(context=self.context, domain_id=monitor.robot.domain_id)
+        self.node = StyriBridgeNode(cfg, monitor, name, context=self.context)
+        self._executor = SingleThreadedExecutor(context=self.context)
         self._executor.add_node(self.node)
         self._thread = threading.Thread(target=self._spin, name="ros-spin", daemon=True)
 
@@ -131,5 +122,5 @@ class RosRuntime:
     def shutdown(self) -> None:
         self._executor.shutdown()
         self.node.destroy_node()
-        rclpy.try_shutdown()
+        rclpy.try_shutdown(context=self.context)
         self._thread.join(timeout=2)

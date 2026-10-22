@@ -92,6 +92,27 @@ Pass settings as environment variables, for example
 | `STYRI_DIAGNOSTICS_TOPIC` | `/diagnostics` | A `diagnostic_msgs/DiagnosticArray` topic |
 | `STYRI_MIN_VOLTAGE` | unset | Volts. Below this the Voltage tile turns amber and the status shows a low-voltage warning, whatever the charge reads. Unset, voltage is shown but never judged. |
 
+### Map your robot's topics
+
+Different topic names, another message type, the robot's own status, or a few
+values of your own? Describe them in one `styri.yaml` and mount it:
+
+```yaml
+robot: {name: amr-01, namespace: /robot1}
+battery: {topic: battery, percentage: charge, percentage_scale: 1, warn_below: 30}
+status: {topic: mode, field: data, fault: [ERROR, ESTOP]}
+fields:
+  - {label: Motor current, topic: motor/current, field: data, unit: A, warn_above: 12}
+```
+
+```bash
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.2.1 styri check
+```
+
+`styri check` tests the file against the live robot and names anything it can't
+find, with close matches. Presets for TurtleBot 4 and generic `BatteryState`
+robots ship in the image. The full reference: [docs/MAPPING.md](docs/MAPPING.md).
+
 All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). Something not showing up? See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Roadmap

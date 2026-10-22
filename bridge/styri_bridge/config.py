@@ -1,14 +1,21 @@
-"""Runtime configuration, read from environment variables.
+"""Runtime configuration: environment variables, plus the topic mapping.
 
-Everything is env-driven so the same image works on any robot:
-`docker run -e ROS_DOMAIN_ID=7 -e STYRI_ROBOT_NAME=amr-01 …`.
+The same image works on any robot. Simple robots need only environment
+variables (`docker run -e ROS_DOMAIN_ID=7 -e STYRI_ROBOT_NAME=amr-01 …`);
+anything else is described in a styri.yaml file (see mapping.py), loaded
+from STYRI_CONFIG or /etc/styri/styri.yaml.
 """
 
 from __future__ import annotations
 
 import os
-import socket
 from dataclasses import dataclass, field
+
+from . import mapping
+
+
+def _env_mapping() -> mapping.Loaded:
+    return mapping.Loaded((mapping.from_env(),), "environment")
 
 
 @dataclass(frozen=True)
@@ -16,29 +23,38 @@ class Config:
     host: str = "0.0.0.0"
     port: int = 8080
     audit_db: str = "/var/lib/styri/audit.db"
-    # Shown in the header. Defaults to the machine's hostname.
-    robot_name: str = field(default_factory=socket.gethostname)
     # The built operator UI, served on the same port as the WebSocket.
     ui_dir: str | None = "/opt/styri/ui"
-    # Topics the Overview reads. Point these at your robot's names.
-    battery_topic: str = "/battery_state"
-    diagnostics_topic: str = "/diagnostics"
-    # A topic that has been publishing counts as stale after this long.
-    stale_after: float = 5.0
-    # Optional low-voltage warning (volts). Unset: voltage is shown, never judged.
-    min_voltage: float | None = None
+    # Which topics and fields feed the panel, and where that came from.
+    mapping: mapping.Loaded = field(default_factory=_env_mapping)
+    # Shown in the header. Defaults to the file's robot name, then the hostname.
+    robot_name: str | None = None
+
+    def __post_init__(self):
+        if self.robot_name is None:
+            object.__setattr__(self, "robot_name", self.robot.name)
+
+    @property
+    def robot(self) -> mapping.RobotMap:
+        """The robot Styri Core shows: the only one, or the first of a list."""
+        return self.mapping.robots[0]
+
+    @property
+    def stale_after(self) -> float:
+        return self.robot.stale_after
+
+    @property
+    def min_voltage(self) -> float | None:
+        v = self.robot.value("voltage")
+        return v.rule.warn_below if v else None
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls, config_file: str | None = None) -> "Config":
         env = os.environ.get
         return cls(
             host=env("STYRI_HOST", cls.host),
             port=int(env("STYRI_PORT", cls.port)),
             audit_db=env("STYRI_AUDIT_DB", cls.audit_db),
-            robot_name=env("STYRI_ROBOT_NAME") or socket.gethostname(),
             ui_dir=env("STYRI_UI_DIR", cls.ui_dir) or None,
-            battery_topic=env("STYRI_BATTERY_TOPIC", cls.battery_topic),
-            diagnostics_topic=env("STYRI_DIAGNOSTICS_TOPIC", cls.diagnostics_topic),
-            stale_after=float(env("STYRI_STALE_AFTER", cls.stale_after)),
-            min_voltage=float(env("STYRI_MIN_VOLTAGE")) if env("STYRI_MIN_VOLTAGE", "").strip() else None,
+            mapping=mapping.load(config_file),
         )

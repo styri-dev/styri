@@ -39,14 +39,12 @@ class FakeRobot:
                 if not hz or now < next_at[name]:
                     continue
                 next_at[name] = now + 1 / hz
-                payload = self._payload(name, t)
-                self.monitor.message(name, payload, now)
                 if name == "/battery_state":
                     self.battery = max(0.05, self.battery - 0.0002)
-                    self.monitor.battery_state(self.battery * 100, payload["voltage"], now)
-                elif name == "/diagnostics":
-                    temp = 58.0 + 2.0 * math.sin(t / 20)
-                    self.monitor.diagnostics([("cpu_monitor", 0, "OK", {"temperature": f"{temp:.1f}"})], now)
+                payload = self._payload(name, t)
+                self.monitor.message(name, payload, now)
+                if name in self.monitor.mapped_topics():
+                    self.monitor.mapped(name, payload, now)
             await asyncio.sleep(tick)
 
     def _payload(self, name: str, t: float) -> dict:

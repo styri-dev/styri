@@ -4,15 +4,18 @@ Run next to a running Styri on the same ROS_DOMAIN_ID, for example:
   docker compose exec -T styri /ros_entrypoint.sh python3 - < ci/check_readonly.py
 Run it from a Jazzy node: Humble cannot read Jazzy's graph info (type hashes).
 Exits non-zero (and says why) if Styri could send anything to the robot.
+READONLY_NODE=styri_check checks the node `styri check` starts instead (its
+name carries a suffix, so this matches by prefix).
 """
 
+import os
 import sys
 import time
 
 import rclpy
 from rclpy.node import Node
 
-TARGET = "styri_bridge"
+TARGET = os.environ.get("READONLY_NODE", "styri_bridge")
 
 rclpy.init()
 probe = Node("styri_readonly_probe")
@@ -21,10 +24,10 @@ found = False
 while time.monotonic() < deadline:
     rclpy.spin_once(probe, timeout_sec=0.2)
     names = probe.get_node_names_and_namespaces()
-    match = [ns for name, ns in names if name == TARGET]
+    match = [(name, ns) for name, ns in names if name == TARGET or name.startswith(TARGET + "_")]
     if match:
         found = True
-        ns = match[0]
+        TARGET, ns = match[0]
         time.sleep(3)  # let discovery settle so we see every endpoint
         rclpy.spin_once(probe, timeout_sec=0.2)
         pubs = probe.get_publisher_names_and_types_by_node(TARGET, ns)

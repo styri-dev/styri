@@ -6,6 +6,7 @@
 |---|---|
 | [`bridge/`](../bridge/) | Python bridge: ROS 2 topic discovery, robot health, activity log; serves the panel and `/ws` |
 | [`ui/`](../ui/) | The operator panel: React + TypeScript, built with Vite into the image |
+| [`presets/`](../presets/) | Example mapping files (`styri.yaml`), also shipped in the image |
 | [`sim/`](../sim/) | A simulated robot as a real ROS 2 node, for testing without hardware |
 | [`e2e/`](../e2e/) | Playwright suite that drives the real panel against the sim |
 | [`ci/`](../ci/) | CI checks: read-only guarantee, no-egress guard, fresh-machine quickstart |
@@ -82,7 +83,11 @@ Arm, with Fast DDS and Cyclone DDS, against a Humble robot, and against a
 robot on a different DDS vendor from Styri. Each e2e run also checks that:
 
 - **Styri is read-only.** The `styri_bridge` node has zero publishers,
-  services and clients on the robot's graph.
+  services and clients on the robot's graph, with and without a mapping file,
+  and so does the node `styri check` starts.
+- **Mapping files work.** `styri check` passes the sim preset and fails a
+  broken file with exit code 1, and the panel shows the preset's tiles and
+  explains the broken file's two mistakes.
 - **Nothing leaves the LAN.** A firewall rule on Styri's user refuses anything
   but loopback, private ranges and multicast, DNS included, and the job fails
   if a single packet is refused.
@@ -108,35 +113,42 @@ npm --prefix ui run dev
 
 ## Configuration
 
-Environment variables, for example `docker run -e ROS_DOMAIN_ID=7 …`:
+Which topics and fields feed the panel can be described in a `styri.yaml`
+file: see [MAPPING.md](MAPPING.md). Everything else, and simple robots, use
+environment variables, for example `docker run -e ROS_DOMAIN_ID=7 …`:
 
 | Variable | Default | |
 |---|---|---|
 | `ROS_DOMAIN_ID` | `0` | Must match the robot |
 | `RMW_IMPLEMENTATION` | `rmw_fastrtps_cpp` | Or `rmw_cyclonedds_cpp` |
+| `STYRI_CONFIG` | `/etc/styri/styri.yaml` if present | Mapping file ([MAPPING.md](MAPPING.md)); without one, the variables below |
 | `STYRI_ROBOT_NAME` | the host name | Shown in the header |
 | `STYRI_BATTERY_TOPIC` | `/battery_state` | A `sensor_msgs/BatteryState` topic |
 | `STYRI_DIAGNOSTICS_TOPIC` | `/diagnostics` | A `diagnostic_msgs/DiagnosticArray` topic |
 | `STYRI_STALE_AFTER` | `5` | Seconds before a value counts as stale |
 | `STYRI_MIN_VOLTAGE` | unset | Volts; below it, a low-voltage warning (clears 0.2 V above) |
+| `STYRI_CPU_HOST_FALLBACK` | unset | `true`: without a CPU figure from the robot, show the Styri machine's own, labelled "Styri host CPU" |
 | `STYRI_PORT` | `8080` | |
 | `STYRI_AUDIT_DB` | `/var/lib/styri/audit.db` | Mount a volume here to keep the log |
 
-Health comes from `/battery_state` (warning below 25 %, fault below 10 %, and
-below `STYRI_MIN_VOLTAGE` if you set it), CPU
-temperature (warning at 75 °C, fault at 85 °C; from a `cpu`-named status in
-`/diagnostics`, or the host's own sensor) and any `/diagnostics` status at
-WARN or ERROR.
+By default, health comes from `/battery_state` (warning below 25 %, fault
+below 10 %, and below `STYRI_MIN_VOLTAGE` if you set it), CPU temperature
+(warning at 75 °C, fault at 85 °C, from a `cpu`-named status in
+`/diagnostics`; the host's own sensor only with `STYRI_CPU_HOST_FALLBACK`) and
+any `/diagnostics` status at WARN or ERROR. A mapping file changes any of it.
 
 ## Protocol
 
 The panel talks to the bridge over one WebSocket at `/ws`. Server to client:
 
 ```jsonc
-{"type": "hello", "version": "0.2.1", "robot": "amr-01", "domain": "0", "stale_after": 5, "controls": false, "min_voltage": null}
+{"type": "hello", "version": "0.2.1", "robot": "amr-01", "domain": "0", "stale_after": 5, "controls": false, "min_voltage": null,
+ "config": {"source": "/etc/styri/styri.yaml", "error": null, "notes": [], "robots_in_file": 1, "namespace": "/robot1", "domain": "0", "stale_after": 5, "host_fallback": false}}
 {"type": "activity", "events": [{"id": 12, "ts": 1792500000.1, "kind": "warning", "msg": "Battery below 25 %", "source": "/battery_state"}]}
 {"type": "event", "event": {…}}
-{"type": "snapshot", "health": {"level": "ok", "line": "All systems normal."}, "battery": {…}, "topics": [{"name": "/odom", "type": "nav_msgs/msg/Odometry", "hz": 20.0, "age": 0.04, "stale": false}], …}
+{"type": "snapshot", "health": {"level": "ok", "line": "All systems normal."}, "battery": {…}, "status": {…}, "fields": [{…}],
+ "mappings": [{"key": "battery", "label": "Battery", "topic": "/robot1/battery_state", "status": "ok", "detail": "", "suggestions": []}],
+ "topics": [{"name": "/odom", "type": "nav_msgs/msg/Odometry", "hz": 20.0, "age": 0.04, "stale": false}], …}
 {"type": "message", "topic": "/odom", "msg_type": "nav_msgs/msg/Odometry", "text": "pose:\n  …"}
 {"type": "pong", "t": 123.4}
 ```
