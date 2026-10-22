@@ -12,7 +12,7 @@ fields are picked by path.
 Mount it at `/etc/styri/styri.yaml`:
 
 ```bash
-docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.2.1
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.3.0
 ```
 
 or put it anywhere and point `STYRI_CONFIG` at it. Without a file, the
@@ -30,7 +30,7 @@ Three presets ship in the image, under `/opt/styri/presets/` (and in
 | `styri-sim.yaml` | The simulated robot in this repo: every kind of mapping |
 
 ```bash
-docker run --rm --network host -e STYRI_CONFIG=/opt/styri/presets/turtlebot4.yaml ghcr.io/styri-dev/styri-core:v0.2.1
+docker run --rm --network host -e STYRI_CONFIG=/opt/styri/presets/turtlebot4.yaml ghcr.io/styri-dev/styri-core:v0.3.0
 ```
 
 ## Check a file before you deploy it
@@ -41,7 +41,7 @@ find. It exits 0 when everything passes, 1 when a mapping fails and 2 when the
 file itself can't be used. Like the panel, it only listens.
 
 ```bash
-docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.2.1 styri check
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.3.0 styri check
 ```
 
 ```

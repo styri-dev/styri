@@ -4,7 +4,7 @@
      this describes the bridge's ROS dependencies for rosdep and the index. -->
 <package format="3">
   <name>styri_bridge</name>
-  <version>0.2.1</version>
+  <version>0.3.0</version>
   <description>
     Styri Core: an offline ROS 2 web dashboard and read-only operator panel.
     Discovers topics over DDS and serves a web panel on the LAN. Never
