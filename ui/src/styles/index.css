@@ -274,8 +274,9 @@ button { font: inherit; }
   .chip, .header__rule, .header__clock { display: none; }
   .wordmark { display: none; }
   .tabs { padding: 0 var(--sp-2); }
-  .tab { padding: 0 7px; font-size: var(--fs-base); }
-  .tab__note--soon { display: none; } /* the tab itself says "coming soon" */
+  .tab { padding: 0 10px; font-size: var(--fs-base); }
+  /* The Controls preview ("coming soon") makes way on phones; tablets and up keep it. */
+  .tab[href="#controls"] { display: none; }
   .tab:has(.tab__short) .tab__long { display: none; }
   .tab--phone-hidden { display: none; }
   .tab__short { display: inline; }
