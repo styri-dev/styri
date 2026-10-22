@@ -13,6 +13,7 @@ export interface Hello {
   controls: boolean;
   min_voltage: number | null; // battery.min_voltage / STYRI_MIN_VOLTAGE, if set
   config?: ConfigSummary;
+  robots?: { index: number; name: string; domain: string }[]; // Core: one; extensions may add more
 }
 
 /** Where the topic mapping came from (hello.config). */
@@ -71,6 +72,7 @@ export interface TopicRow {
 
 export interface Snapshot {
   robot: string;
+  robot_index?: number;
   domain: string;
   robot_found: boolean;
   health: { level: Health; line: string };
@@ -98,22 +100,36 @@ export interface ActivityEvent {
 
 export interface TopicMessage {
   topic: string;
+  robot_index?: number;
   msg_type?: string;
   text?: string | null;
   note?: string | null;
   error?: string;
 }
 
+export interface History {
+  cpuTemp: number[];
+  load: number[];
+} // last HISTORY snapshots, oldest first
+
 export interface BridgeState {
   conn: ConnState;
   hello?: Hello;
-  snapshot?: Snapshot;
-  snapshotAt?: number; // Date.now() when the last snapshot arrived
+  // Per robot index: Styri Core shows one robot (index 0).
+  snapshots: Record<number, Snapshot>;
+  snapshotAt: Record<number, number>; // Date.now() when each robot's last snapshot arrived
+  history: Record<number, History>;
   events: ActivityEvent[];
   latencyMs?: number;
   retryAt?: number; // Date.now() of the next reconnect attempt
   message?: TopicMessage;
-  history: { cpuTemp: number[]; load: number[] }; // last HISTORY snapshots, oldest first
+}
+
+const NO_HISTORY: History = { cpuTemp: [], load: [] };
+
+/** One robot's slice of the state. */
+export function forRobot(state: BridgeState, robot: number) {
+  return { snapshot: state.snapshots[robot], snapshotAt: state.snapshotAt[robot], history: state.history[robot] ?? NO_HISTORY };
 }
 
 const MAX_EVENTS = 5000;
@@ -129,7 +145,7 @@ export function bridgeUrl(): string {
 }
 
 export function useBridge(url: string) {
-  const [state, setState] = useState<BridgeState>({ conn: "connecting", events: [], history: { cpuTemp: [], load: [] } });
+  const [state, setState] = useState<BridgeState>({ conn: "connecting", events: [], snapshots: {}, snapshotAt: {}, history: {} });
   const wsRef = useRef<WebSocket | null>(null);
   const connectNow = useRef<() => void>(() => {});
 
@@ -167,12 +183,18 @@ export function useBridge(url: string) {
           case "hello":
             setState((s) => ({ ...s, hello: msg }));
             break;
-          case "snapshot":
-            setState((s) => ({
-              ...s, snapshot: msg, snapshotAt: Date.now(),
-              history: { cpuTemp: push(s.history.cpuTemp, typeof msg.cpu_temp?.value === "number" ? msg.cpu_temp.value : null), load: push(s.history.load, msg.host?.load_pct) },
-            }));
+          case "snapshot": {
+            const i: number = msg.robot_index ?? 0;
+            setState((s) => {
+              const h = s.history[i] ?? NO_HISTORY;
+              const cpu = typeof msg.cpu_temp?.value === "number" ? msg.cpu_temp.value : null;
+              return {
+                ...s, snapshots: { ...s.snapshots, [i]: msg }, snapshotAt: { ...s.snapshotAt, [i]: Date.now() },
+                history: { ...s.history, [i]: { cpuTemp: push(h.cpuTemp, cpu), load: push(h.load, msg.host?.load_pct) } },
+              };
+            });
             break;
+          }
           case "activity": // full history on (re)connect, newest first
             setState((s) => ({ ...s, events: msg.events }));
             break;
@@ -214,14 +236,20 @@ export function useBridge(url: string) {
     };
   }, [url]);
 
-  const select = useCallback((topic: string) => {
+  const select = useCallback((topic: string, robot = 0) => {
     const ws = wsRef.current;
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: "SELECT", topic }));
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: "SELECT", topic, robot }));
+  }, []);
+
+  /** Send any action an extension handles (Core itself only knows PING and SELECT). */
+  const send = useCallback((payload: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
   }, []);
 
   const retryNow = useCallback(() => connectNow.current(), []);
 
-  return { state, select, retryNow };
+  return { state, select, send, retryNow };
 }
 
 /** Re-render periodically so ages and the clock tick without new data. */

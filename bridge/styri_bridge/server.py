@@ -88,6 +88,25 @@ Action = Callable[[Session, dict], Awaitable[dict | None]]
 Route = Callable[[ServerConnection, Request], Response | None]
 
 
+@dataclass
+class RobotView:
+    """One robot the panel shows. Styri Core has exactly one; extensions may add more."""
+    index: int
+    name: str
+    domain: str
+    monitor: Monitor
+
+
+class _Tagged:
+    """Activity from one of several robots: the robot's name goes in front."""
+
+    def __init__(self, activity: Activity, name: str):
+        self.activity, self.name = activity, name
+
+    def add(self, kind: str, msg: str, source: str) -> None:
+        self.activity.add(kind, f"{self.name} · {msg}", source)
+
+
 class BridgeServer:
     def __init__(self, cfg: Config, audit: AuditLog):
         self.cfg = cfg
@@ -100,9 +119,10 @@ class BridgeServer:
         self.decode = None
         self.domain = str(cfg.robot.domain_id) if cfg.robot.domain_id is not None \
             else os.environ.get("ROS_DOMAIN_ID", "0")
+        self.robots: list[RobotView] = [RobotView(0, cfg.robot_name, self.domain, self.monitor)]
         self.clients: set[ServerConnection] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._snapshot: dict | None = None
+        self._snapshots: dict[int, dict] = {}
         # Extension points (see extensions.py). Empty in Styri Core.
         self.actions: dict[str, Action] = {}
         self.routes: dict[str, Route] = {}
@@ -147,7 +167,7 @@ class BridgeServer:
                                   "configuration")
             else:
                 logger.info("Topic mapping from %s", self.cfg.mapping.source)
-            tasks = [asyncio.create_task(self._snapshots())] + [asyncio.create_task(f()) for f in self.background]
+            tasks = [asyncio.create_task(self._snapshots_loop())] + [asyncio.create_task(f()) for f in self.background]
             try:
                 await stop
             finally:
@@ -155,6 +175,16 @@ class BridgeServer:
                     task.cancel()
                 for hook in self.on_shutdown:
                     hook()
+
+    def add_robot(self, robot) -> RobotView:
+        """Show another robot (a mapping.RobotMap). Extensions feed its monitor."""
+        if len(self.robots) == 1:
+            self.monitor.activity = _Tagged(self.activity, self.robots[0].name)
+        domain = str(robot.domain_id) if robot.domain_id is not None else os.environ.get("ROS_DOMAIN_ID", "0")
+        view = RobotView(len(self.robots), robot.name, domain,
+                         Monitor(_Tagged(self.activity, robot.name), robot))
+        self.robots.append(view)
+        return view
 
     def config_summary(self) -> dict:
         """Where the mapping came from, for the panel's Configuration view."""
@@ -167,18 +197,24 @@ class BridgeServer:
                 "robots_in_file": len(loaded.robots), "namespace": robot.namespace or None,
                 "domain": self.domain, "stale_after": robot.stale_after, "host_fallback": robot.host_fallback}
 
-    def snapshot(self) -> dict:
-        snap = self.monitor.evaluate()
-        snap.update(type="snapshot", robot=self.cfg.robot_name, domain=self.domain)
-        self._snapshot = snap
+    def snapshot(self, index: int = 0) -> dict:
+        r = self.robots[index]
+        snap = r.monitor.evaluate()
+        snap.update(type="snapshot", robot=r.name, domain=r.domain, robot_index=r.index)
+        self._snapshots[index] = snap
         return snap
 
-    async def _snapshots(self) -> None:
+    @property
+    def _snapshot(self) -> dict | None:
+        return self._snapshots.get(0)
+
+    async def _snapshots_loop(self) -> None:
         while True:
-            try:
-                self.publish_threadsafe(self.snapshot())
-            except Exception:  # never let one bad reading stop the panel
-                logger.exception("snapshot failed")
+            for r in self.robots:
+                try:
+                    self.publish_threadsafe(self.snapshot(r.index))
+                except Exception:  # never let one bad reading stop the panel
+                    logger.exception("snapshot failed for %s", r.name)
             await asyncio.sleep(SNAPSHOT_PERIOD)
 
     # ---- HTTP -----------------------------------------------------------
@@ -204,11 +240,12 @@ class BridgeServer:
         hello = {"type": "hello", "version": __version__, "robot": self.cfg.robot_name,
                  "domain": self.domain, "stale_after": self.cfg.stale_after, "controls": False,
                  "min_voltage": self.cfg.min_voltage, "config": self.config_summary(),
+                 "robots": [{"index": r.index, "name": r.name, "domain": r.domain} for r in self.robots],
                  **self.hello_extra}
         await ws.send(json.dumps(hello))
         await ws.send(json.dumps({"type": "activity", "events": self.activity.recent()}))
-        if self._snapshot is not None:
-            await ws.send(json.dumps(self._snapshot, allow_nan=False))
+        for snap in list(self._snapshots.values()):
+            await ws.send(json.dumps(snap, allow_nan=False))
         # Join the broadcast only after the history, so no event is sent twice.
         self.clients.add(ws)
         for hook in self.on_connect:
@@ -233,7 +270,8 @@ class BridgeServer:
             if action == "PING":
                 return {"type": "pong", "t": protocol.ping(data).t}
             if action == "SELECT":
-                return await self._select(protocol.select(data).topic)
+                sel = protocol.select(data)
+                return await self._select(sel.topic, sel.robot)
         except protocol.ProtocolError as exc:
             return {"type": "error", "error": str(exc)}
         if action in self.actions:
@@ -241,11 +279,14 @@ class BridgeServer:
         self.audit.record("command_rejected", client=session.client, action=action[:64], reason="read-only")
         return {"type": "error", "action": action[:64], "error": READ_ONLY}
 
-    async def _select(self, topic: str) -> dict:
-        state, raw = self.monitor.latest(topic)
+    async def _select(self, topic: str, robot: int = 0) -> dict:
+        if robot >= len(self.robots):
+            return {"type": "message", "topic": topic, "robot_index": robot, "error": "unknown robot"}
+        state, raw = self.robots[robot].monitor.latest(topic)
         if state is None:
-            return {"type": "message", "topic": topic, "error": "unknown topic"}
-        reply = {"type": "message", "topic": topic, "msg_type": state.type, "text": None, "note": None}
+            return {"type": "message", "topic": topic, "robot_index": robot, "error": "unknown topic"}
+        reply = {"type": "message", "topic": topic, "robot_index": robot, "msg_type": state.type,
+                 "text": None, "note": None}
         if not state.supported:
             reply["note"] = f"{state.type} is not installed in this image, so Styri can list it but not read it."
         elif raw is None:

@@ -21,6 +21,7 @@ class Ping:
 class Select:
     """Ask for the latest message on one topic (Topics tab)."""
     topic: str
+    robot: int = 0  # which robot's view, when a panel shows several
 
 
 def parse(raw: str | bytes) -> tuple[str, dict]:
@@ -45,4 +46,7 @@ def select(data: dict) -> Select:
     topic = data.get("topic")
     if not isinstance(topic, str) or not topic or len(topic) > 256:
         raise ProtocolError("'topic' must be a topic name")
-    return Select(topic)
+    robot = data.get("robot", 0)
+    if isinstance(robot, bool) or not isinstance(robot, int) or not 0 <= robot < 64:
+        raise ProtocolError("'robot' must be a robot index")
+    return Select(topic, robot)

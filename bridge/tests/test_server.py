@@ -53,7 +53,8 @@ def test_hello_activity_history_and_live_events():
         ws = await connect(url)
         hello = json.loads(await ws.recv())
         assert hello == {"type": "hello", "version": hello["version"], "robot": "test-bot", "domain": hello["domain"],
-                         "stale_after": 5.0, "controls": False, "min_voltage": None, "config": hello["config"]}
+                         "stale_after": 5.0, "controls": False, "min_voltage": None, "config": hello["config"],
+                         "robots": [{"index": 0, "name": "test-bot", "domain": hello["domain"]}]}
         assert hello["config"]["source"] == "environment" and hello["config"]["error"] is None
         history = json.loads(await ws.recv())
         assert history["type"] == "activity"
@@ -171,3 +172,36 @@ def test_extensions_can_add_actions():
 def test_core_installs_no_extensions():
     from importlib.metadata import entry_points
     assert list(entry_points(group="styri.extensions")) == []
+
+
+def test_an_extension_can_add_robots():
+    from styri_bridge.mapping import from_dict
+
+    second = from_dict({"robot": {"name": "amr-2", "namespace": "/amr2"}}, {})[0][0]
+
+    def setup(server):
+        view = server.add_robot(second)
+        view.monitor.discovered([("/amr2/odom", "nav_msgs/msg/Odometry")], lambda t: True)
+        view.monitor.message("/amr2/odom", {"pose": {"x": 2.0}})
+
+    async def t(url, server, audit):
+        ws = await connect(url)
+        hello = json.loads(await ws.recv())
+        assert [r["name"] for r in hello["robots"]] == ["test-bot", "amr-2"]
+        snaps = {}
+        while len(snaps) < 2:
+            msg = json.loads(await asyncio.wait_for(ws.recv(), 3))
+            if msg["type"] == "snapshot":
+                snaps[msg["robot_index"]] = msg
+        assert snaps[1]["robot"] == "amr-2" and snaps[1]["seen"] == ["/amr2/odom"]
+        await send(ws, action="SELECT", topic="/amr2/odom", robot=1)
+        reply = await recv_reply(ws)
+        assert reply["robot_index"] == 1 and "x: 2.0" in reply["text"]
+        await send(ws, action="SELECT", topic="/amr2/odom", robot=7)
+        assert (await recv_reply(ws))["error"] == "unknown robot"
+        # With several robots, activity says which one it's about.
+        server.monitor.activity.add("warning", "Battery below 25 %", "/battery_state")
+        assert any(e["msg"] == "test-bot · Battery below 25 %" for e in server.activity.recent())
+        await ws.close()
+
+    run_bridge(t, setup=setup)

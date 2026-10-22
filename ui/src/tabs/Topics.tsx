@@ -15,9 +15,10 @@ export function Topics(props: {
   disc: boolean;
   discAge: number;
   message?: TopicMessage;
-  select: (topic: string) => void;
+  robot?: number;
+  select: (topic: string, robot?: number) => void;
 }) {
-  const { snap, disc, discAge, message, select } = props;
+  const { snap, disc, discAge, message, select, robot = 0 } = props;
   const [picked, setPicked] = useState<string | null>(null);
   const topics = snap?.topics ?? [];
   const sel = topics.find((t) => t.name === picked)?.name
@@ -26,10 +27,10 @@ export function Topics(props: {
   // Refresh the latest message while it is on screen.
   useEffect(() => {
     if (!sel || disc) return;
-    select(sel);
-    const t = setInterval(() => select(sel), 1000);
+    select(sel, robot);
+    const t = setInterval(() => select(sel, robot), 1000);
     return () => clearInterval(t);
-  }, [sel, disc, select]);
+  }, [sel, disc, select, robot]);
 
   if (!snap) return <p className="empty">Waiting for the bridge…</p>;
   const selRow = topics.find((t) => t.name === sel);

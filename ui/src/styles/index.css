@@ -277,6 +277,7 @@ button { font: inherit; }
   .tab { padding: 0 7px; font-size: var(--fs-base); }
   .tab__note--soon { display: none; } /* the tab itself says "coming soon" */
   .tab:has(.tab__short) .tab__long { display: none; }
+  .tab--phone-hidden { display: none; }
   .tab__short { display: inline; }
   .crow { grid-template-columns: minmax(0, 1fr) auto; }
   .crow .pill { grid-column: 2; grid-row: 1; }
