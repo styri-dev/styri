@@ -54,7 +54,7 @@ def test_hello_activity_history_and_live_events():
         hello = json.loads(await ws.recv())
         assert hello == {"type": "hello", "version": hello["version"], "robot": "test-bot", "domain": hello["domain"],
                          "stale_after": 5.0, "controls": False, "min_voltage": None, "config": hello["config"],
-                         "robots": [{"index": 0, "name": "test-bot", "domain": hello["domain"]}]}
+                         "robots": [{"index": 0, "name": "test-bot", "domain": hello["domain"], "namespace": None}]}
         assert hello["config"]["source"] == "environment" and hello["config"]["error"] is None
         history = json.loads(await ws.recv())
         assert history["type"] == "activity"

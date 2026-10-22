@@ -13,7 +13,7 @@ export interface Hello {
   controls: boolean;
   min_voltage: number | null; // battery.min_voltage / STYRI_MIN_VOLTAGE, if set
   config?: ConfigSummary;
-  robots?: { index: number; name: string; domain: string }[]; // Core: one; extensions may add more
+  robots?: { index: number; name: string; domain: string; namespace: string | null }[]; // Core: one; extensions may add more
 }
 
 /** Where the topic mapping came from (hello.config). */

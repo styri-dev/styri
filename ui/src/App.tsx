@@ -116,9 +116,13 @@ export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
   const robotName = state.hello?.robots?.[robot]?.name ?? snap?.robot ?? state.hello?.robot ?? "—";
   const retryIn = state.retryAt ? Math.max(0, Math.ceil((state.retryAt - now) / 1000)) : 0;
   const ctx: PanelContext = { state, robot, setRobot, send, now };
-  // The per-robot tabs see the selected robot's name and domain.
-  const hello = state.hello && robot > 0
-    ? { ...state.hello, robot: robotName, domain: snap?.domain ?? state.hello.domain }
+  // The per-robot tabs see the selected robot's name, domain and namespace.
+  const picked = state.hello?.robots?.[robot];
+  const hello = state.hello && robot > 0 && picked
+    ? {
+        ...state.hello, robot: picked.name, domain: picked.domain,
+        config: state.hello.config && { ...state.hello.config, domain: picked.domain, namespace: picked.namespace },
+      }
     : state.hello;
 
   const conn =

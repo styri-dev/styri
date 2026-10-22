@@ -242,7 +242,8 @@ class BridgeServer:
         hello = {"type": "hello", "version": __version__, "robot": self.cfg.robot_name,
                  "domain": self.domain, "stale_after": self.cfg.stale_after, "controls": False,
                  "min_voltage": self.cfg.min_voltage, "config": self.config_summary(),
-                 "robots": [{"index": r.index, "name": r.name, "domain": r.domain} for r in self.robots],
+                 "robots": [{"index": r.index, "name": r.name, "domain": r.domain,
+                             "namespace": r.monitor.robot.namespace or None} for r in self.robots],
                  **self.hello_extra}
         await ws.send(json.dumps(hello))
         await ws.send(json.dumps({"type": "activity", "events": self.activity.recent()}))
