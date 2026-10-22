@@ -134,7 +134,7 @@ All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). Somethin
 | Includes | Read-only operator panel, live telemetry, local activity log | Everything in Core, plus fleet view across robots and direct support | Everything in Pilot, plus offline Zarf package, compliance audit log exports, offline hardware-locked license |
 | | You're here | [Talk to us](https://styri.dev/#talk) | [Contact us](https://styri.dev/#talk) |
 
-Running more than one robot, or deploying to a site without internet? [Talk to us](https://styri.dev/#talk).
+Running more than one robot? Styri Pilot is the public `ghcr.io/styri-dev/styri-pro` image plus a license file: [docs/PILOT.md](docs/PILOT.md). Deploying to a site without internet? [Talk to us](https://styri.dev/#talk).
 
 ## Contributing
 
