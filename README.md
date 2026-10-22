@@ -26,6 +26,8 @@ Open **http://localhost:8080**. Styri finds your robot's topics over DDS and sho
 
 Host networking lets Styri see DDS discovery on your LAN. Open source: [read the code](.) before you run it.
 
+Deploying to a client fleet? We can set it up for you. [Talk to us](https://styri.dev/#talk)
+
 **On a Mac?** Run Styri on the robot or any Linux machine on its network, and open the panel from any browser, Mac included. Docker on macOS can't see a robot on another machine, but `docker compose up` (below) gives you the full demo with a simulated robot.
 
 **No robot handy?** Run the simulated robot and the panel together:
@@ -125,7 +127,7 @@ All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). Somethin
 
 | | Core | Commercial Pilot | Air-Gapped Enterprise |
 |---|---|---|---|
-| Price | Free (open source) | $3,600/yr | Contact us |
+| Price | Free (open source) | $360/mo or $3,600/yr | Contact us |
 | Status | Available now | Coming soon | Coming soon |
 | Robots | 1 | Up to 5 | Unlimited |
 | Network | Local LAN | Local LAN | Air-gapped site, site-wide |
