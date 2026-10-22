@@ -68,7 +68,7 @@ robot:
 stale_after: 5                # seconds before a value counts as stale (default 5)
 
 battery:
-  topic: battery_state        # default /battery_state
+  topic: battery_state        # default battery_state (relative, so it gets the namespace)
   percentage: percentage      # field path (default percentage)
   percentage_scale: 100       # multiply to get %: 100 for 0–1, 1 if it already sends 0–100
   voltage: voltage            # field path, or false for no voltage tile
@@ -78,7 +78,7 @@ battery:
   stale_after: 5
 
 cpu_temperature:
-  topic: /diagnostics         # a DiagnosticArray: pick the entry and key by name ...
+  topic: diagnostics          # default; a DiagnosticArray: pick the entry and key by name ...
   status_name: cpu            # (case-insensitive, part of the name is enough)
   key: temp
   # field: temperature        # ... or any other topic, by field path
@@ -93,7 +93,7 @@ status:                       # the robot's own status, shown as a tile
   fault: [ERROR, ESTOP]       # values that mean FAULT; anything else is shown as it is
 
 diagnostics:
-  topic: /diagnostics         # WARN and ERROR entries show on the Overview; false to ignore
+  topic: diagnostics          # default; WARN and ERROR entries show on the Overview; false to ignore
 
 fields:                       # up to 5 more tiles
   - label: Motor current

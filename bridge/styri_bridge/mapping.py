@@ -385,7 +385,7 @@ def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dic
                 {"topic", "percentage", "percentage_scale", "voltage", "stale_after", "min_voltage",
                  "warn_below", "fault_below", "hysteresis"})
     if not off("battery"):
-        btopic = resolve(b.topic("topic", "/battery_state"), namespace)
+        btopic = resolve(b.topic("topic", "battery_state"), namespace)
         bstale = b.num("stale_after", stale, positive=True)
         pct = b.path("percentage", "percentage")
         if pct:
@@ -403,7 +403,7 @@ def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dic
                  "stale_after", "host_fallback"})
     host_fallback = c.bool("host_fallback", False)
     if not off("cpu_temperature"):
-        ctopic = c.topic("topic", "/diagnostics")
+        ctopic = c.topic("topic", "diagnostics")
         crule = Rule(warn_above=c.num("warn_above", 75.0), fault_above=c.num("fault_above", 85.0),
                      hysteresis=c.num("hysteresis", 2.0))
         cstale = c.num("stale_after", stale, positive=True)
@@ -458,11 +458,11 @@ def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dic
                                     f.num("stale_after", CUSTOM_STALE_AFTER, positive=True)))
 
     d = section("diagnostics")
-    diag_topic: str | None = "/diagnostics"
+    diag_topic: str | None = resolve("diagnostics", namespace)
     if d is False:
         diag_topic = None
     elif d is not None:
-        diag_topic = resolve(_Reader(d, f"{where}diagnostics", problems, {"topic"}).topic("topic", "/diagnostics"),
+        diag_topic = resolve(_Reader(d, f"{where}diagnostics", problems, {"topic"}).topic("topic", "diagnostics"),
                              namespace)
     labels = [v.label for v in values if v.key.startswith("field")]
     for dup in {x for x in labels if labels.count(x) > 1}:
