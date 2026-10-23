@@ -128,11 +128,11 @@ All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). Somethin
 | | Core | Commercial Pilot | Air-Gapped Enterprise |
 |---|---|---|---|
 | Price | Free (open source) | $360/mo or $3,600/yr | Contact us |
-| Status | Available now | Coming soon | Coming soon |
+| Status | Available now | Available now | Coming soon |
 | Robots | 1 | Up to 5 | Unlimited |
 | Network | Local LAN | Local LAN | Air-gapped site, site-wide |
 | Includes | Read-only operator panel, live telemetry, local activity log | Everything in Core, plus fleet view across robots and direct support | Everything in Pilot, plus offline Zarf package, compliance audit log exports, offline hardware-locked license |
-| | You're here | [Talk to us](https://styri.dev/#talk) | [Contact us](https://styri.dev/#talk) |
+| | You're here | [Buy or talk to us](https://styri.dev/#pricing) | [Contact us](https://styri.dev/#talk) |
 
 Running more than one robot? Styri Pilot is the public `ghcr.io/styri-dev/styri-pro` image plus a license file: [docs/PILOT.md](docs/PILOT.md). Deploying to a site without internet? [Talk to us](https://styri.dev/#talk).
 
