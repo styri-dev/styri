@@ -71,6 +71,8 @@ Nothing should appear while Styri runs. (DDS discovery uses LAN multicast, 224.0
 
 Foxglove helps engineers analyze robot data. Formant runs fleets from the cloud. Styri helps operators run robots on site — fully offline, from the free tier up.
 
+**Already using [rosboard](https://github.com/dheera/rosboard) or another ROS web viewer?** Those are great for engineers exploring topics. Styri adds what operators need on the floor: a clear OK / WARNING / FAULT verdict with the reason, your own thresholds in one `styri.yaml`, values that show their age and turn STALE, `styri check` against the live robot, and a read-only panel that never publishes.
+
 ## How it works
 
 ```
