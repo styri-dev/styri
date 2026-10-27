@@ -142,7 +142,7 @@ any `/diagnostics` status at WARN or ERROR. A mapping file changes any of it.
 The panel talks to the bridge over one WebSocket at `/ws`. Server to client:
 
 ```jsonc
-{"type": "hello", "version": "0.3.0", "robot": "amr-01", "domain": "0", "stale_after": 5, "controls": false, "min_voltage": null,
+{"type": "hello", "version": "0.3.1", "robot": "amr-01", "domain": "0", "stale_after": 5, "controls": false, "min_voltage": null,
  "config": {"source": "/etc/styri/styri.yaml", "error": null, "notes": [], "robots_in_file": 1, "namespace": "/robot1", "domain": "0", "stale_after": 5, "host_fallback": false}}
 {"type": "activity", "events": [{"id": 12, "ts": 1792500000.1, "kind": "warning", "msg": "Battery below 25 %", "source": "/battery_state"}]}
 {"type": "event", "event": {…}}

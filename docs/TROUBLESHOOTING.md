@@ -8,7 +8,7 @@ three.
 
 1. **`ROS_DOMAIN_ID`.** Styri only sees robots on the same domain. Check the
    robot (`echo $ROS_DOMAIN_ID`) and pass the same value:
-   `docker run -e ROS_DOMAIN_ID=7 --rm --network host ghcr.io/styri-dev/styri-core:v0.3.0`
+   `docker run -e ROS_DOMAIN_ID=7 --rm --network host ghcr.io/styri-dev/styri-core:v0.3.1`
 2. **`--network host`.** DDS discovery uses UDP multicast. Without host
    networking the container can't see the robot's nodes. On macOS and
    Windows, Docker (Docker Desktop, Colima, OrbStack) runs containers in a VM
@@ -59,7 +59,7 @@ To be warned about that, set the lowest voltage you consider safe for your
 pack:
 
 ```bash
-docker run -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.3.0
+docker run -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.3.1
 ```
 
 Below that, the Voltage tile turns amber, the status shows "Battery voltage
@@ -76,7 +76,9 @@ lower `STYRI_MIN_VOLTAGE`, or unset it.
 
 Its message type isn't installed in the image (common for a robot's own
 custom messages). Styri still lists it and counts its rate; it just can't show
-the contents.
+the contents. `styri check` names the missing package. To read it, add the
+robot's message packages as an overlay:
+[MAPPING.md, "Your own message types"](MAPPING.md#your-own-message-types).
 
 ## The panel says "Lost connection to bridge"
 

@@ -14,7 +14,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
-from .mapping import RobotMap, Rule, Value, convert, diag_lookup, extract, suggest
+from .mapping import NoItem, RobotMap, Rule, Value, convert, diag_lookup, extract, suggest
 from .mapping import from_env as mapping_from_env
 
 # Topics every ROS 2 graph has; they say nothing about the robot.
@@ -178,11 +178,18 @@ class Monitor:
         with self._lock:
             for v in self._by_topic.get(name, ()):
                 try:
-                    raw = diag_lookup(msg, v.diag_status, v.diag_key) if v.diag_status is not None \
-                        else extract(msg, v.field)
-                    value = convert(raw, v.kind)
+                    try:
+                        raw = diag_lookup(msg, v.diag_status, v.diag_key) if v.diag_status is not None \
+                            else extract(msg, v.field)
+                    except NoItem:
+                        if v.when_empty is None:
+                            raise
+                        raw = None
+                    value = v.when_empty if raw is None and v.when_empty is not None else convert(raw, v.kind)
                     if v.kind == "number" and value is not None:
                         value *= v.scale
+                    if v.labels and raw is not None:
+                        value = dict(v.labels).get(str(value).strip().lower(), value)
                 except (LookupError, TypeError, ValueError) as exc:
                     self.errors[v.key] = str(exc)
                     continue
@@ -203,14 +210,18 @@ class Monitor:
     # ---- derived state ------------------------------------------------------
 
     @staticmethod
-    def _stale(r: Reading, now: float, after: float) -> bool:
-        return r.at is not None and now - r.at > after
+    def _stale(r: Reading, now: float, after: float | None) -> bool:
+        return after is not None and r.at is not None and now - r.at > after
 
     def _reading(self, v: Value, now: float) -> tuple[Reading, str]:
         """The reading behind a tile, and the label to show with it."""
         if v.topic is None:  # cpu_temperature: {topic: host}
             return self.host_cpu, "Styri host CPU"
         r = self.readings[v.key]
+        # Nothing published yet on a topic that's there: for a value with
+        # when_empty (e.g. no goal since Nav2 started) that is the answer.
+        if r.at is None and v.when_empty is not None and v.topic in self.topics and self.topics[v.topic].supported:
+            return Reading(v.when_empty, now, v.topic), v.label
         # Only when the file asks for it (host_fallback: true), and labelled as such.
         if v.key == "cpu_temp" and self.robot.host_fallback and self.host_cpu.value is not None \
                 and (r.value is None or self._stale(r, now, v.stale_after)):
@@ -237,7 +248,7 @@ class Monitor:
             level, direction = ("ok", None) if stale else judge(r.value, v.kind, v.rule, self._levels[v.key])
             self._transition(v, level, direction, r.source, r.value)
             self._levels[v.key] = level
-            if r.source != "host" and r.at is not None:
+            if r.source != "host" and r.at is not None and v.stale_after is not None:
                 robot_readings.append((r, v.stale_after))
             if level != "ok":
                 reasons.append((level, self._reason(v, r.value, level, direction)))
@@ -375,7 +386,9 @@ class Monitor:
                         hint = f" Did you mean {row['suggestions'][0]}?" if row["suggestions"] else ""
                         self.activity.add("warning", f"Mapped topic {topic} not found.{hint}", "configuration")
             elif not t.supported:
-                row.update(status="error", detail=f"Its type, {t.type}, isn't installed here, so Styri can't read it.")
+                row.update(status="error", detail=f"Its type, {t.type}, isn't installed here, so Styri can't read it. "
+                                                  "Load its package as an overlay (docs/MAPPING.md).",
+                           missing_type=t.type)
             elif v is not None and key in self.errors and (tiles[key]["age"] is None or tiles[key]["stale"]):
                 row.update(status="error", detail=f"Can't read the value: {self.errors[key]}.")
                 if key not in self._error_logged:

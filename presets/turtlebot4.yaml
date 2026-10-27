@@ -34,8 +34,7 @@ fields:
     field: temperature
     unit: °C
     warn_above: 45
-  # Docked or not needs irobot_create_msgs installed next to Styri:
-  # - label: Docked
-  #   topic: dock_status
-  #   field: is_docked
-  #   kind: bool
+  - label: Docked
+    topic: dock_status       # irobot_create_msgs/DockStatus (in the image since v0.3.1)
+    field: is_docked
+    kind: bool

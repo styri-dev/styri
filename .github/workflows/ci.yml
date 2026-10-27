@@ -105,7 +105,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Build Styri and the simulated robot
-        run: docker compose build
+        run: |
+          docker compose build
+          docker pull -q ros:jazzy-ros-base  # builds the overlay test's message package
       - name: Arm the no-egress guard
         run: sudo ci/egress-guard.sh start "$STYRI_IMAGE"
       - name: Start
@@ -146,6 +148,26 @@ jobs:
           run --seconds 25 /opt/styri/presets/styri-sim.yaml > /dev/null &
           docker compose exec -T -e READONLY_NODE=styri_check styri /ros_entrypoint.sh python3 - < ci/check_readonly.py
           wait
+      - name: Nav2, and a robot's own message types through an overlay
+        run: |
+          run() { docker compose exec -T styri /ros_entrypoint.sh styri check "$@"; }
+          run /opt/styri/presets/nav2.yaml
+          run --seconds 13 /etc/styri/fixtures/nav2-feedback.yaml  # nav2_msgs, from the robot's goal cycle
+          # Build a message package the way docs/MAPPING.md says, publish it, read it.
+          ws="$RUNNER_TEMP/ws" && mkdir -p "$ws/src" && cp -r e2e/fixtures/styri_demo_msgs "$ws/src/"
+          docker run --rm -v "$ws/src:/ws/src:ro" -v "$ws/styri-msgs:/ws/install" ros:jazzy-ros-base \
+            bash -c 'source /opt/ros/jazzy/setup.bash && cd /ws && colcon build --install-base /ws/install'
+          docker run -d --name demo-pub --network host -e ROS_DOMAIN_ID=42 -e FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
+            -v "$ws/styri-msgs:/ov:ro" ros:jazzy-ros-base \
+            bash -c 'source /opt/ros/jazzy/setup.bash && source /ov/local_setup.bash &&
+                     ros2 topic pub -r 2 /demo_mode styri_demo_msgs/msg/Mode "{name: AUTO, level: 3}"'
+          set +e; run /etc/styri/fixtures/custom-type.yaml | tee no-overlay.txt; code=${PIPESTATUS[0]}; set -e
+          [ "$code" = 1 ] && grep -q "Add the styri_demo_msgs package as a message overlay" no-overlay.txt
+          docker run --rm --network host -e ROS_DOMAIN_ID=42 -e RMW_IMPLEMENTATION \
+            -v "$ws/styri-msgs:/opt/styri/overlay:ro" -v "$PWD/e2e/fixtures:/etc/styri/fixtures:ro" \
+            "$STYRI_IMAGE" styri check /etc/styri/fixtures/custom-type.yaml | tee overlay.txt
+          grep -q "Message overlay: /opt/styri/overlay" overlay.txt
+          docker rm -f demo-pub
       - name: Playwright with a mapping file (preset, then a broken one)
         working-directory: e2e
         run: |

@@ -220,3 +220,88 @@ def test_host_cpu_by_choice_is_labelled():
     assert snap["cpu_temp"]["label"] == "Styri host CPU" and snap["cpu_temp"]["value"] == 48.0
     row = next(r for r in snap["mappings"] if r["key"] == "cpu_temp")
     assert row["status"] == "ok" and row["topic"] is None
+
+
+# ---- Nav2: latest goal, labels, when_empty, never stale -------------------
+
+GOALS = "/navigate_to_pose/_action/status"
+
+
+def nav2_monitor():
+    log, clock = Log(), Clock()
+    m = Monitor(log, load(str(PRESETS / "nav2.yaml")).robots[0], clock=clock)
+    m.discovered([(GOALS, "action_msgs/msg/GoalStatusArray"), ("/battery_state", "sensor_msgs/msg/BatteryState"),
+                  ("/odom", "nav_msgs/msg/Odometry")], lambda t: True)
+    return m, log, clock
+
+
+def goals(*statuses):
+    return {"status_list": [{"status": s} for s in statuses]}
+
+
+def test_negative_index_is_the_last_item():
+    assert mapping.parse_path("status_list[-1].status") == ["status_list", -1, "status"]
+    assert extract(goals(2, 4, 6), "status_list[-1].status") == 6
+    with pytest.raises(mapping.NoItem, match="the list is empty"):
+        extract(goals(), "status_list[-1].status")
+
+
+def test_nav2_preset_shows_the_latest_goal_by_name():
+    m, log, clock = nav2_monitor()
+    # On the network, nothing published yet (no goal since Nav2 started): IDLE.
+    snap = m.evaluate()
+    assert snap["status"]["value"] == "IDLE" and snap["status"]["label"] == "Navigation"
+    assert next(r for r in snap["mappings"] if r["key"] == "status")["status"] == "ok"
+
+    m.message(GOALS, b"x")
+    m.mapped(GOALS, goals(4, 2))
+    assert m.evaluate()["status"]["value"] == "NAVIGATING"
+
+    m.mapped(GOALS, goals(4, 6))
+    snap = m.evaluate()
+    assert snap["status"]["value"] == "FAILED"
+    assert snap["health"] == {"level": "warn", "line": "Navigation reports FAILED."}
+
+    m.mapped(GOALS, goals())  # the old goals expired
+    assert m.evaluate()["status"]["value"] == "IDLE"
+
+    clock.t += 3600  # published on change only: never stale, and doesn't hold up NO DATA
+    snap = m.evaluate()
+    assert not snap["status"]["stale"] and snap["status"]["value"] == "IDLE"
+
+
+def test_unlisted_raw_values_show_as_they_are():
+    m, _, _ = nav2_monitor()
+    m.mapped(GOALS, goals(9))
+    assert m.evaluate()["status"]["value"] == "9"
+
+
+def test_labels_and_when_empty_are_for_text():
+    assert problems("status: {topic: s, kind: bool, labels: {1: ON}}") == \
+        ["status: labels and when_empty are for text fields (kind: text)"]
+    assert problems("fields: [{label: A, topic: a, field: data, when_empty: X}]") == \
+        ["fields[0]: labels and when_empty are for text fields (kind: text)"]
+    assert problems("status: {topic: s, labels: [ON]}") == \
+        ["status.labels: expected value: word pairs, like {4: SUCCEEDED}"]
+
+
+def test_stale_after_false_means_never():
+    r = robot("status: {topic: s, stale_after: false}\nfields: [{label: A, topic: a, field: data, stale_after: false}]")
+    assert r.value("status").stale_after is None and r.value("field1").stale_after is None
+    assert problems("status: {topic: s, stale_after: true}") == ["status.stale_after: expected a number"]
+
+
+def test_unknown_type_points_to_overlays():
+    log, clock = Log(), Clock()
+    m = Monitor(log, robot("status: {topic: mode}"), clock=clock)
+    m.discovered([("/mode", "acme_msgs/msg/Mode"), ("/other", "acme_msgs/msg/Other")], lambda t: False)
+    row = next(r for r in m.evaluate()["mappings"] if r["key"] == "status")
+    assert row["status"] == "error" and row["missing_type"] == "acme_msgs/msg/Mode"
+    assert "overlay" in row["detail"]
+
+    from styri_bridge import check
+    assert check.unknown_types([m]) == {"acme_msgs": 2}
+    lines = []
+    check.report(m.robot, [row], lines.append)
+    assert "its type, acme_msgs/msg/Mode, isn't installed here" in lines[1]
+    assert lines[2].strip().startswith("Add the acme_msgs package as a message overlay: https://")

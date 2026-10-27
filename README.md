@@ -19,7 +19,7 @@ Built for the operators running robots on site, not a cloud dashboard miles away
 Run it on any ROS 2 machine (Humble or Jazzy, amd64 or arm64):
 
 ```bash
-docker run --rm --network host ghcr.io/styri-dev/styri-core:v0.3.0
+docker run --rm --network host ghcr.io/styri-dev/styri-core:v0.3.1
 ```
 
 Open **http://localhost:8080**. Styri finds your robot's topics over DDS and shows them live.
@@ -86,7 +86,7 @@ One container: a small bridge subscribes to your ROS 2 topics and serves a stati
 ## Configuration
 
 Pass settings as environment variables, for example
-`docker run -e ROS_DOMAIN_ID=7 -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.3.0`.
+`docker run -e ROS_DOMAIN_ID=7 -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.3.1`.
 
 | Variable | Default | |
 |---|---|---|
@@ -110,12 +110,15 @@ fields:
 ```
 
 ```bash
-docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.3.0 styri check
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.3.1 styri check
 ```
 
 `styri check` tests the file against the live robot and names anything it can't
-find, with close matches. Presets for TurtleBot 4 and generic `BatteryState`
-robots ship in the image. The full reference: [docs/MAPPING.md](docs/MAPPING.md).
+find, with close matches. Presets for Nav2 (navigation status), TurtleBot 4
+and generic `BatteryState` robots ship in the image, along with Nav2's and
+other common message types. Your robot's own message types load as an
+[overlay](docs/MAPPING.md#your-own-message-types). The full reference:
+[docs/MAPPING.md](docs/MAPPING.md).
 
 All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). Something not showing up? See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 

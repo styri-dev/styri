@@ -94,7 +94,11 @@ class Value:
     kind: str = "number"     # number, text or bool
     scale: float = 1.0
     rule: Rule = Rule()
-    stale_after: float = 5.0
+    stale_after: float | None = 5.0  # None: never stale (topics that publish only on change)
+    # Text values: show these words for the raw values (e.g. 4 -> SUCCEEDED), and
+    # this value when the path finds no item or the topic hasn't published yet.
+    labels: tuple = ()  # ((raw, word), ...), raw lowercased
+    when_empty: str | None = None
     # For a diagnostic_msgs/DiagnosticArray: match an entry and a key by name
     # (case-insensitive substrings) instead of a field path.
     diag_status: str | None = None
@@ -138,11 +142,11 @@ class Loaded:
 
 # ---- field paths --------------------------------------------------------
 
-_PART = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)((?:\[\d+\])*)")
+_PART = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)((?:\[-?\d+\])*)")
 
 
 def parse_path(path: str) -> list[str | int]:
-    """'status.values[0].value' -> ['status', 'values', 0, 'value']."""
+    """'status.values[0].value' -> ['status', 'values', 0, 'value']; [-1] is the last item."""
     if not isinstance(path, str) or not path.strip():
         raise ValueError("is empty")
     parts: list[str | int] = []
@@ -151,15 +155,22 @@ def parse_path(path: str) -> list[str | int]:
         if not m:
             raise ValueError(f"“{path}” is not a field path (use names, dots and [index])")
         parts.append(m.group(1))
-        parts += [int(i) for i in re.findall(r"\[(\d+)\]", m.group(2))]
+        parts += [int(i) for i in re.findall(r"\[(-?\d+)\]", m.group(2))]
     return parts
+
+
+class NoItem(LookupError):
+    """The path is right but the list has no such item (often: it's empty)."""
 
 
 def _child(obj: Any, part: str | int) -> Any:
     if isinstance(part, int):
         try:
             return obj[part]
-        except (IndexError, KeyError, TypeError):
+        except (IndexError, KeyError):
+            raise NoItem(f"no item [{part}]" + (" (the list is empty)" if hasattr(obj, "__len__") and not len(obj)
+                                                 else "")) from None
+        except TypeError:
             raise LookupError(f"no item [{part}]") from None
     if isinstance(obj, dict):
         if part in obj:
@@ -294,6 +305,27 @@ class _Reader:
             return default
         return float(v)
 
+    def stale(self, key: str, default: float | None) -> float | None:
+        """Seconds before a value is stale; false for never (published only on change)."""
+        if self.data.get(key) is False:
+            return None
+        return self.num(key, default, positive=True)
+
+    def labels(self, key: str) -> tuple:
+        v = self.data.get(key)
+        if v is None:
+            return ()
+        if not isinstance(v, dict) or not v:
+            self.problems.append(f"{self.prefix}{key}: expected value: word pairs, like {{4: SUCCEEDED}}")
+            return ()
+        out = []
+        for raw, word in v.items():
+            if isinstance(word, (dict, list)) or word is None:
+                self.problems.append(f"{self.prefix}{key}: {raw}: expected a word")
+                continue
+            out.append((str(raw).strip().lower(), str(word)))
+        return tuple(out)
+
     def bool(self, key: str, default: bool = False) -> bool:
         v = self.data.get(key, default)
         if not isinstance(v, bool):
@@ -355,6 +387,15 @@ def _rule(r: _Reader, kind: str, defaults: Rule = Rule()) -> Rule:
         # YAML reads bare yes/no/on/off/true/false as true or false.
         r.problems.append(f"{r.where}: put text values like \"OFF\" or \"yes\" in quotes")
     return rule
+
+
+def _text_extras(r: _Reader, kind: str) -> tuple[tuple, str | None]:
+    """labels and when_empty: for text values only."""
+    labels, empty = r.labels("labels"), r.str("when_empty")
+    if kind != "text" and (labels or empty is not None):
+        r.problems.append(f"{r.where}: labels and when_empty are for text fields (kind: text)")
+        return (), None
+    return labels, empty
 
 
 def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dict) -> RobotMap:
@@ -421,7 +462,7 @@ def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dic
     # The robot's own status, judged by value lists.
     if section("status") is not None:
         s = _Reader(section("status"), f"{where}status", problems,
-                    {"topic", "field", "label", "warn", "fault", "stale_after", "kind"})
+                    {"topic", "field", "label", "warn", "fault", "stale_after", "kind", "labels", "when_empty"})
         kind = s.str("kind", "text")
         if kind not in ("text", "bool"):
             problems.append(f"{where}status.kind: text or bool")
@@ -430,8 +471,8 @@ def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dic
             problems.append(f"{where}status.topic: required")
         else:
             values.append(Value("status", s.str("label", "Status"), resolve(s.topic("topic"), namespace),
-                                s.path("field", "data"), "", kind, 1.0, _rule(s, kind), s.num("stale_after", stale,
-                                                                                               positive=True)))
+                                s.path("field", "data"), "", kind, 1.0, _rule(s, kind), s.stale("stale_after", stale),
+                                *_text_extras(s, kind)))
 
     # Up to five custom tiles.
     fields = section("fields")
@@ -444,7 +485,8 @@ def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dic
             fields = fields[:MAX_FIELDS]
         for i, raw in enumerate(fields):
             f = _Reader(raw, f"{where}fields[{i}]", problems,
-                        {"label", "topic", "field", "unit", "kind", "stale_after", "warn", "fault"} | THRESHOLDS)
+                        {"label", "topic", "field", "unit", "kind", "stale_after", "warn", "fault",
+                         "labels", "when_empty"} | THRESHOLDS)
             kind = f.str("kind", "number")
             if kind not in KINDS:
                 problems.append(f"{where}fields[{i}].kind: one of number, text, bool")
@@ -455,7 +497,7 @@ def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dic
             if f.has("label") and f.has("topic") and f.has("field"):
                 values.append(Value(f"field{i + 1}", f.str("label"), resolve(f.topic("topic"), namespace),
                                     f.path("field"), f.str("unit", ""), kind, 1.0, _rule(f, kind),
-                                    f.num("stale_after", CUSTOM_STALE_AFTER, positive=True)))
+                                    f.stale("stale_after", CUSTOM_STALE_AFTER), *_text_extras(f, kind)))
 
     d = section("diagnostics")
     diag_topic: str | None = resolve("diagnostics", namespace)

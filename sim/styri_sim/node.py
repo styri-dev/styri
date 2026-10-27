@@ -8,16 +8,22 @@ import os
 import time
 
 import rclpy
+from action_msgs.msg import GoalInfo, GoalStatus, GoalStatusArray
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from sensor_msgs.msg import BatteryState, LaserScan
 from std_msgs.msg import String
 
 from .model import Limits, SimRobot
+
+try:  # Nav2's own messages, when installed (the sim image has them)
+    from nav2_msgs.action import NavigateToPose
+except ImportError:
+    NavigateToPose = None
 
 logger = logging.getLogger("styri_sim")
 
@@ -27,6 +33,9 @@ FAULT_TOPIC = "/styri_sim/fault"
 # can wait until the robot has actually applied the fault.
 FAULT_DIR = "/tmp/styri_sim_faults"
 PHYSICS_HZ = 50
+# A Nav2-style goal cycle on the NavigateToPose action's topics: a goal runs
+# for NAV_RUN s, then succeeds (every third one fails), then NAV_GAP s idle.
+NAV_RUN, NAV_GAP = 8.0, 4.0
 
 
 class SimNode(Node):
@@ -44,6 +53,18 @@ class SimNode(Node):
         self._status_pub = self.create_publisher(String, "robot_status", reliable)
         self._odom_pub = self.create_publisher(Odometry, "odom", reliable)
         self._scan_pub = self.create_publisher(LaserScan, "scan", reliable)
+
+        # Like a real action server: status latched (reliable, transient
+        # local) and published only on change; feedback while a goal runs.
+        latched = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                             history=HistoryPolicy.KEEP_LAST, depth=1)
+        self._goal_pub = self.create_publisher(GoalStatusArray, "navigate_to_pose/_action/status", latched)
+        self._feedback_pub = None if NavigateToPose is None else self.create_publisher(
+            NavigateToPose.Impl.FeedbackMessage, "navigate_to_pose/_action/feedback", reliable)
+        self._goals: list[GoalStatus] = []
+        self._goal_n = 0
+        self._goal_started = time.monotonic() + NAV_GAP  # the first goal after a short idle
+        self.create_timer(0.5, self._navigate)
 
         self._last = time.monotonic()
         self.create_timer(1 / PHYSICS_HZ, self._step)
@@ -131,6 +152,27 @@ class SimNode(Node):
     def _publish_status(self) -> None:
         if not self.robot.silent(time.monotonic()):
             self._status_pub.publish(String(data=self.robot.status))
+
+    def _navigate(self) -> None:
+        now = time.monotonic()
+        running = bool(self._goals) and self._goals[-1].status == GoalStatus.STATUS_EXECUTING
+        if not running and now >= self._goal_started:
+            self._goal_n += 1
+            info = GoalInfo()
+            info.goal_id.uuid = [self._goal_n % 256] * 16
+            info.stamp = self.get_clock().now().to_msg()
+            self._goals = (self._goals + [GoalStatus(goal_info=info, status=GoalStatus.STATUS_EXECUTING)])[-3:]
+            self._goal_pub.publish(GoalStatusArray(status_list=self._goals))
+        elif running and now >= self._goal_started + NAV_RUN:
+            self._goals[-1].status = GoalStatus.STATUS_ABORTED if self._goal_n % 3 == 0 \
+                else GoalStatus.STATUS_SUCCEEDED
+            self._goal_pub.publish(GoalStatusArray(status_list=self._goals))
+            self._goal_started = now + NAV_GAP
+        elif running and self._feedback_pub is not None:
+            msg = NavigateToPose.Impl.FeedbackMessage()
+            msg.goal_id = self._goals[-1].goal_info.goal_id
+            msg.feedback.distance_remaining = float(max(0.0, 4.0 * (1 - (now - self._goal_started) / NAV_RUN)))
+            self._feedback_pub.publish(msg)
 
     def _publish_odom(self) -> None:
         if self.robot.silent(time.monotonic()):

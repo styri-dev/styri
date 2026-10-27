@@ -1,0 +1,9 @@
+# For CI: a robot's own message type (styri_demo_msgs/msg/Mode, built from
+# e2e/fixtures/styri_demo_msgs), read through a message overlay.
+robot: {name: overlay-test}
+battery: false
+cpu_temperature: false
+diagnostics: false
+status: {topic: /demo_mode, field: name, warn: [MANUAL]}
+fields:
+  - {label: Level, topic: /demo_mode, field: level}

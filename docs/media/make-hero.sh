@@ -6,7 +6,7 @@
 # Needs: docker, vhs, ffmpeg, node, the JetBrains Mono font, port 8080 free and
 # nothing else on ROS_DOMAIN_ID 0. Run from the repo root:
 #   docs/media/make-hero.sh            the latest v* tag (what the README shows)
-#   docs/media/make-hero.sh v0.3.0     a specific, already published release
+#   docs/media/make-hero.sh v0.3.1     a specific, already published release
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 version=${1:-$(git -C "$root" describe --tags --abbrev=0 --match 'v*')}

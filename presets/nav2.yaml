@@ -1,0 +1,42 @@
+# A robot running Nav2 (Jazzy or Humble). The Navigation tile is the latest
+# NavigateToPose goal, read from the action's status topic, which Nav2 only
+# publishes when a goal changes state (so it never goes stale). Battery,
+# diagnostics and odometry are the usual topics; rename them to your robot's.
+# Check against your robot with:  styri check nav2.yaml
+robot:
+  name: nav2-robot
+  namespace: ""              # e.g. /robot1 for a namespaced Nav2 stack
+
+battery:
+  topic: battery_state       # sensor_msgs/BatteryState, percentage 0-1
+  percentage: percentage
+  percentage_scale: 100
+  voltage: voltage
+  warn_below: 25
+  fault_below: 10
+
+diagnostics:
+  topic: /diagnostics        # Nav2 nodes that report diagnostics show on the Overview
+
+status:
+  label: Navigation
+  topic: navigate_to_pose/_action/status   # action_msgs/GoalStatusArray
+  field: status_list[-1].status            # the latest goal
+  labels: {0: UNKNOWN, 1: ACCEPTED, 2: NAVIGATING, 3: CANCELING, 4: SUCCEEDED, 5: CANCELED, 6: FAILED}
+  when_empty: IDLE           # no goal since Nav2 started, or the last ones expired
+  warn: [FAILED]             # Nav2 aborted the goal: someone should look
+  stale_after: false         # published on change only: silence is normal
+
+fields:
+  - label: Speed
+    topic: odom              # nav_msgs/Odometry
+    field: twist.twist.linear.x
+    unit: m/s
+    stale_after: 3
+  # Distance left to the goal, from Nav2's own feedback (nav2_msgs). It is only
+  # published while a goal is running, so between goals the tile shows STALE.
+  # - label: Distance to goal
+  #   topic: navigate_to_pose/_action/feedback
+  #   field: feedback.distance_remaining
+  #   unit: m
+  #   stale_after: 3

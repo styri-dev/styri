@@ -16,7 +16,7 @@ import rclpy
 from rclpy.executors import ExternalShutdownException, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.convert import message_to_yaml
 from rosidl_runtime_py.utilities import get_message
@@ -65,6 +65,12 @@ class StyriBridgeNode(Node):
         # never back-pressures the robot. Raw bytes: counting a camera's
         # frames costs nothing; we only decode what someone looks at.
         self._qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST, depth=5)
+        # Latched topics (an action's status, a map) publish only on change and
+        # keep their last message for late joiners; that takes a reliable,
+        # transient-local subscription. Used only for mapped topics whose every
+        # publisher is latched, so Styri sees the current value on start.
+        self._latched = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                   history=HistoryPolicy.KEEP_LAST, depth=1)
         self._subs = {}
         self._classes = {}
         # Only mapped topics are decoded; everything else is just counted.
@@ -80,8 +86,9 @@ class StyriBridgeNode(Node):
 
     def _discover(self) -> None:
         scope = self.scope.rstrip("/") + "/" if self.scope else None
+        # Hidden topics (an action's _action/status) only when mapped.
         graph = [(name, types[0]) for name, types in self.get_topic_names_and_types()
-                 if types and not _hidden(name)
+                 if types and (name in self._mapped or not _hidden(name))
                  and (scope is None or name.startswith(scope) or name in self._mapped)][:MAX_TOPICS]
         types = dict(graph)
         for name in self.monitor.discovered(graph, lambda t: _message_class(t) is not None):
@@ -91,7 +98,15 @@ class StyriBridgeNode(Node):
                 continue
             self._classes[name] = cls
             self._subs[name] = self.create_subscription(
-                cls, name, lambda raw, n=name, t=types[name]: self._on_raw(n, t, raw), self._qos, raw=True)
+                cls, name, lambda raw, n=name, t=types[name]: self._on_raw(n, t, raw), self._qos_for(name), raw=True)
+
+    def _qos_for(self, name: str) -> QoSProfile:
+        if name in self._mapped:
+            pubs = self.get_publishers_info_by_topic(name)
+            if pubs and all(p.qos_profile.durability == DurabilityPolicy.TRANSIENT_LOCAL
+                            and p.qos_profile.reliability == ReliabilityPolicy.RELIABLE for p in pubs):
+                return self._latched
+        return self._qos
 
     def _on_raw(self, name: str, type_name: str, raw: bytes) -> None:
         self.monitor.message(name, raw)

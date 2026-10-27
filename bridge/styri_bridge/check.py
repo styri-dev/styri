@@ -19,6 +19,12 @@ from .monitor import MISSING_GRACE, Monitor
 
 Out = Callable[[str], None]
 
+CUSTOM_TYPES = "https://github.com/styri-dev/styri/blob/main/docs/MAPPING.md#your-own-message-types"
+
+
+def _package(type_name: str) -> str:
+    return type_name.split("/", 1)[0]
+
 
 def _shown(row: dict) -> str:
     v = row.get("value")
@@ -48,15 +54,32 @@ def report(robot: mapping.RobotMap, rows: list[dict], out: Out) -> int:
                                               if row["suggestions"] else "")
         elif row["status"] == "waiting":
             detail = "on the network, but nothing was published while listening."
+        elif row.get("missing_type"):
+            detail = f"its type, {row['missing_type']}, isn't installed here, so Styri can't read it."
         else:
             detail = row["detail"]
         out(f"  {'PASS' if ok else 'FAIL'}  {row['label']:<20} {row['where']}  {detail}".rstrip())
+        if row.get("missing_type"):
+            out(f"        Add the {_package(row['missing_type'])} package as a message overlay: {CUSTOM_TYPES}")
     return failed
+
+
+def unknown_types(monitors: list[Monitor]) -> dict[str, int]:
+    """Packages of the types seen on the network but not installed here, with topic counts."""
+    names: dict[str, str] = {}
+    for m in monitors:
+        names |= {t.name: t.type for t in m.topics.values() if not t.supported}
+    counts: dict[str, int] = {}
+    for type_name in names.values():
+        counts[_package(type_name)] = counts.get(_package(type_name), 0) + 1
+    return counts
 
 
 def run(path: str | None, seconds: float = 5.0, out: Out = print) -> int:
     path = path or mapping.config_path()
     out(f"Styri v{__version__} check · {path or 'no file: the STYRI_* environment defaults'}")
+    for overlay in filter(None, os.environ.get("STYRI_OVERLAYS", "").split(":")):
+        out(f"Message overlay: {overlay}")
     if path:
         try:
             robots, notes = mapping.load_file(path)
@@ -93,6 +116,12 @@ def run(path: str | None, seconds: float = 5.0, out: Out = print) -> int:
             rows = monitor.evaluate()["mappings"]
             failed += report(robot, rows, out)
             total += len(rows)
+        unknown = unknown_types(monitors)
+        if unknown:
+            n = sum(unknown.values())
+            out(f"\nNote: {n} topic{'s' * (n > 1)} on the network use{'s' * (n == 1)} message types not installed here "
+                f"({', '.join(f'{pkg} ×{k}' for pkg, k in sorted(unknown.items()))}). Styri counts their rate but "
+                f"can't show their contents. To add them: {CUSTOM_TYPES}")
     finally:
         for runtime in runtimes:
             runtime.shutdown()

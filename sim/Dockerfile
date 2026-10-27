@@ -4,9 +4,10 @@
 ARG ROS_DISTRO=jazzy
 FROM ros:${ROS_DISTRO}-ros-base
 ARG ROS_DISTRO
-# Cyclone DDS too, so tests can run the robot on either RMW.
+# Cyclone DDS too, so tests can run the robot on either RMW; Nav2's messages
+# for its NavigateToPose feedback.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+ && apt-get install -y --no-install-recommends ros-${ROS_DISTRO}-rmw-cyclonedds-cpp ros-${ROS_DISTRO}-nav2-msgs \
  && rm -rf /var/lib/apt/lists/*
 COPY styri_sim /opt/sim/styri_sim
 WORKDIR /opt/sim

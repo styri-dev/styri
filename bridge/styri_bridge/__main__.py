@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 
@@ -35,6 +36,8 @@ async def _main(fake: bool, config_file: str | None = None) -> None:
         logger.info("Running with FAKE robot (no ROS 2)")
     else:
         from .ros_node import RosRuntime, decode
+        for overlay in filter(None, os.environ.get("STYRI_OVERLAYS", "").split(":")):
+            logger.info("Message overlay loaded: %s", overlay)
         ros = RosRuntime(cfg, server.monitor)
         server.decode = decode
         for hook in server.on_ros_node:
