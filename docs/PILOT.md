@@ -32,7 +32,7 @@ receive by email after you buy, unlocks the fleet.
      -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" \
      -v "$PWD/license.json:/etc/styri/license.json:ro" \
      -v styri-data:/var/lib/styri \
-     ghcr.io/styri-dev/styri-pro:v0.3.0
+     ghcr.io/styri-dev/styri-pro:v0.3.1
    ```
 
    `/etc/styri/license.json` is where Styri looks. To keep the license
@@ -54,7 +54,7 @@ with SHA-256 sums. Copy the tarball for the site's machine
 
 ```bash
 sha256sum -c --ignore-missing SHA256SUMS.txt
-docker load < styri-pro-v0.3.0-linux-amd64.tar.gz
+docker load < styri-pro-v0.3.1-linux-amd64.tar.gz
 ```
 
 and run it as above.
