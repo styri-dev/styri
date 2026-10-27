@@ -10,7 +10,7 @@
 
 Built for the operators running robots on site, not a cloud dashboard miles away. Open-source ROS 2 operator panel that runs on the robot or any Linux box on its network and works in any browser on the LAN. Fully offline, free from the first robot. One command to start.
 
-[Website](https://styri.dev) · [Quickstart](#quickstart) · [How it compares](#foxglove-in-the-lab-formant-in-the-cloud-styri-on-the-floor) · [Pricing](#editions)
+[Website](https://styri.dev) · [Quickstart](#quickstart) · [How it compares](#foxglove-in-the-lab-formant-in-the-cloud-styri-on-the-floor) · [Pricing](#editions) · [Help](https://styri.dev/help)
 
 ---
 
