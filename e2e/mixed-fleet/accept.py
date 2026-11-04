@@ -11,12 +11,28 @@ import socket
 import sys
 import time
 
+import aiomqtt
 from websockets.asyncio.client import connect
 
 PASSWORD = os.environ.get("STYRI_ADMIN_PASSWORD", "styri-demo")
 NO_INTERNET = os.environ.get("EXPECT_NO_INTERNET") == "1"
 GOALS = {"amr-01": {"x": 6, "y": 4}, "agv-07": {"node": "n3"}, "agv-08": {"node": "n6"}}
 fleet: dict = {}
+
+
+async def wait_for_panel():
+    """The panel and its broker take a moment after `docker compose up`."""
+    deadline = time.monotonic() + 60
+    while True:
+        try:
+            async with aiomqtt.Client("127.0.0.1"):
+                pass
+            async with connect("ws://127.0.0.1:8080/ws", origin="http://127.0.0.1:8080"):
+                return
+        except (OSError, aiomqtt.MqttError):
+            if time.monotonic() > deadline:
+                sys.exit("FAIL the panel or its broker didn't come up in 60 s")
+            await asyncio.sleep(0.5)
 
 
 def step(text):
@@ -44,6 +60,7 @@ async def until(what, test, seconds=30):
 
 
 async def main():
+    await wait_for_panel()
     if NO_INTERNET:
         with socket.socket() as s:
             s.settimeout(3)

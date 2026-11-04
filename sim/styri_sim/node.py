@@ -245,9 +245,12 @@ def run() -> None:
     rclpy.init()
     node = SimNode(robot)
     try:
-        executor = MultiThreadedExecutor()
-        executor.add_node(node)
-        executor.spin()
+        if os.environ.get("SIM_NAV_SERVER"):  # a goal runs in its own thread
+            executor = MultiThreadedExecutor()
+            executor.add_node(node)
+            executor.spin()
+        else:
+            rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
