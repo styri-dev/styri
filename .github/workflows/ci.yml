@@ -113,7 +113,7 @@ jobs:
       - name: Panel control
         run: |
           docker compose up -d
-          curl -fsS --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/healthz
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 1 http://localhost:8080/healthz
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
