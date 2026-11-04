@@ -3,6 +3,7 @@
 import asyncio
 import json
 import socket
+from dataclasses import replace
 
 from websockets.asyncio.client import connect
 
@@ -10,7 +11,7 @@ from styri_bridge.audit import AuditLog
 from styri_bridge.config import Config
 from styri_bridge.server import BridgeServer
 
-BROADCASTS = {"event", "snapshot"}
+BROADCASTS = {"event", "snapshot", "fleet"}
 
 
 def free_port():
@@ -19,9 +20,10 @@ def free_port():
         return s.getsockname()[1]
 
 
-def run_bridge(test, ui_dir=None, setup=None):
+def run_bridge(test, ui_dir=None, setup=None, cfg=None):
     """Start a bridge, run `await test(url, server, audit)`, stop it. Returns the audit log."""
-    cfg = Config(host="127.0.0.1", port=free_port(), audit_db=":memory:", ui_dir=ui_dir, robot_name="test-bot")
+    cfg = replace(cfg, host="127.0.0.1", port=free_port()) if cfg else \
+        Config(host="127.0.0.1", port=free_port(), audit_db=":memory:", ui_dir=ui_dir, robot_name="test-bot")
     audit = AuditLog(":memory:")
     server = BridgeServer(cfg, audit)
     if setup:

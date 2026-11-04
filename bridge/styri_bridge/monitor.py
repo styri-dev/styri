@@ -133,6 +133,8 @@ class Monitor:
         self._levels: dict[str, str] = {k: "ok" for k in self.values}
         self._diag_levels: dict[str, int] = {}
         self._overall = None
+        # Extra readers of a topic, beyond the tiles (the pose, a Nav2 goal's status).
+        self.taps: dict[str, Callable[[Any], None]] = {}
         self._graph_announced = False
         self._no_robot_logged = False
         self._missing_logged: set[str] = set()
@@ -140,7 +142,7 @@ class Monitor:
 
     def mapped_topics(self) -> set[str]:
         """Topics whose messages need decoding (the rest are only counted)."""
-        return self.robot.topics()
+        return self.robot.topics() | set(self.taps)
 
     # ---- inputs (any thread) -------------------------------------------
 
@@ -168,6 +170,9 @@ class Monitor:
     def mapped(self, name: str, msg: Any, now: float | None = None) -> None:
         """A decoded message (a ROS message, or a dict from the fake robot) on a mapped topic."""
         now = self.clock() if now is None else now
+        tap = self.taps.get(name)
+        if tap is not None:
+            tap(msg)
         statuses = None
         if name == self.robot.diagnostics_topic:
             try:
@@ -199,6 +204,12 @@ class Monitor:
                 for status_name, level, text in statuses:
                     self.diag[status_name] = (level, text)
                 self.diag_at = now
+
+    def faults(self, entries: dict[str, tuple[int, str]], now: float | None = None) -> None:
+        """Replace the robot's own faults, as name -> (level, message). For protocols without /diagnostics."""
+        with self._lock:
+            self.diag = dict(entries)
+            self.diag_at = self.clock() if now is None else now
 
     def host_vitals(self, cpu_temperature: float | None, load_pct: float | None = None,
                     now: float | None = None) -> None:

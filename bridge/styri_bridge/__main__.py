@@ -22,13 +22,14 @@ async def _main(fake: bool, config_file: str | None = None) -> None:
     audit = AuditLog(cfg.audit_db)
     server = BridgeServer(cfg, audit)
     loaded = extensions.load(server)
+    server.build_robots()
 
     loop = asyncio.get_running_loop()
     stop = loop.create_future()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda: stop.done() or stop.set_result(None))
 
-    ros = None
+    runtimes = []
     tasks = []
     if fake:
         from .fake import FakeRobot
@@ -38,11 +39,18 @@ async def _main(fake: bool, config_file: str | None = None) -> None:
         from .ros_node import RosRuntime, decode
         for overlay in filter(None, os.environ.get("STYRI_OVERLAYS", "").split(":")):
             logger.info("Message overlay loaded: %s", overlay)
-        ros = RosRuntime(cfg, server.monitor)
         server.decode = decode
-        for hook in server.on_ros_node:
-            hook(ros.node)
-        ros.start()
+        # One subscribe-only node per ROS robot, in its own context so each can
+        # have its own domain. With several, each keeps to its namespace.
+        ros_robots = [r for r in server.robots if r.map.link.protocol == "ros2"]
+        for view in ros_robots:
+            runtime = RosRuntime(cfg, view.monitor, name=f"styri_bridge_{view.index}" if view.index else "styri_bridge")
+            if len(server.robots) > 1:
+                runtime.node.scope = view.map.namespace or None
+            for hook in server.on_ros_node:
+                hook(view, runtime.node)
+            runtime.start()
+            runtimes.append(runtime)
     tasks.append(asyncio.create_task(system.run(
         lambda v: server.monitor.host_vitals(v["cpu_temperature"], v.get("load_pct")))))
 
@@ -53,8 +61,8 @@ async def _main(fake: bool, config_file: str | None = None) -> None:
         logger.info("Shutting down Styri...")
         for task in tasks:
             task.cancel()
-        if ros:
-            ros.shutdown()
+        for runtime in runtimes:
+            runtime.shutdown()
         audit.record("bridge_stop")
         audit.close()
 

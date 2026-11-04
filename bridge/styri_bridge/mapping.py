@@ -19,7 +19,7 @@ variables describe a sensor_msgs/BatteryState robot, as before.
       topic: robot_status
       field: data
       warn: [DEGRADED]
-      fault: [ERROR, ESTOP]
+      fault: [ERROR, STOPPED]
     cpu_temperature:
       topic: /diagnostics         # a DiagnosticArray: pick an entry and key ...
       status_name: cpu
@@ -36,8 +36,10 @@ variables describe a sensor_msgs/BatteryState robot, as before.
         warn_above: 12
 
 A file may instead hold `robots:`, a list of robot entries in the same
-shape, with any top-level sections as shared defaults. Styri Core shows the
-first robot; Styri Pilot shows up to five.
+shape, with any top-level sections as shared defaults. An entry also takes
+flat keys (`name`, `protocol`, `namespace`, `cmd_vel`, ...), and the file takes
+`site:`, `control:` and `vda:`. Styri Core shows the first three robots; Styri
+Pilot up to its license.
 """
 
 from __future__ import annotations
@@ -56,7 +58,15 @@ DEFAULT_PATH = "/etc/styri/styri.yaml"
 MAX_FIELDS = 5
 CUSTOM_STALE_AFTER = 3.0
 SECTIONS = {"robot", "battery", "status", "cpu_temperature", "diagnostics", "fields", "stale_after"}
+SITE_SECTIONS = {"site", "control", "vda"}  # the whole file's, never one robot's
+ROBOT_KEYS = {"name", "protocol", "namespace", "domain_id", "vendor", "model", "cmd_vel", "nav2_action", "pose", "odom",
+              "pause_topic", "max_linear", "max_angular", "manufacturer", "serial", "username", "password_env",
+              "map_offset", "instant_actions", "points"}
+PROTOCOLS = ("ros2", "vda5050")
 KINDS = {"number", "text", "bool"}
+INSTANT_ACTIONS = ("startPause", "stopPause", "cancelOrder", "factsheetRequest")
+# VDA 5050 asks for a state message at least every 30 s, so silence below that is normal.
+VDA_STALE_AFTER = 35.0
 
 
 class ConfigError(ValueError):
@@ -113,6 +123,34 @@ class Value:
 
 
 @dataclass(frozen=True)
+class Link:
+    """How Styri reaches a robot, beyond the values it shows."""
+    protocol: str = "ros2"
+    vendor: str | None = None
+    model: str | None = None
+    # ROS 2: what may be sent (the whitelist), and where the pose comes from.
+    cmd_vel: str | None = None
+    nav2_action: str | None = None
+    pause_topic: str | None = None  # std_msgs/Bool: true pauses, false resumes
+    pose: str | None = None
+    odom: str | None = None
+    max_linear: float = 0.5   # m/s
+    max_angular: float = 1.0  # rad/s
+    # VDA 5050.
+    manufacturer: str | None = None
+    serial: str | None = None
+    username: str | None = None
+    password_env: str | None = None
+    instant_actions: tuple[str, ...] = INSTANT_ACTIONS
+    # Both.
+    map_offset: tuple[float, float, float] = (0.0, 0.0, 0.0)  # x, y, theta
+    points: tuple[tuple[str, float, float, float], ...] = ()  # saved waypoints: name, x, y, theta
+
+    def nav2_status(self) -> str | None:
+        return f"{self.nav2_action}/_action/status" if self.nav2_action else None
+
+
+@dataclass(frozen=True)
 class RobotMap:
     name: str
     namespace: str = ""
@@ -121,6 +159,7 @@ class RobotMap:
     diagnostics_topic: str | None = "/diagnostics"
     host_fallback: bool = False
     stale_after: float = 5.0
+    link: Link = Link()
 
     def value(self, key: str) -> Value | None:
         return next((v for v in self.values if v.key == key), None)
@@ -133,11 +172,34 @@ class RobotMap:
 
 
 @dataclass(frozen=True)
+class Broker:
+    """The MQTT broker VDA 5050 robots talk to."""
+    url: str | None = None     # a site's own broker; then the bundled one doesn't start
+    bind: str | None = None    # LAN address for the bundled broker; localhost only without it
+    port: int = 1883
+    tls_cert: str | None = None
+    tls_key: str | None = None
+
+
+@dataclass(frozen=True)
+class Settings:
+    """The whole file's settings: `site:`, `control:`, `vda:`."""
+    site_name: str | None = None
+    map: str | None = None     # background: map.yaml, or an image with scale and origin
+    graph: str | None = None   # node graph, JSON
+    control: bool = False
+    session_hours: float = 8.0
+    interface: str = "uagv"
+    broker: Broker = Broker()
+
+
+@dataclass(frozen=True)
 class Loaded:
     robots: tuple[RobotMap, ...]
     source: str            # the file path, or "environment"
     notes: tuple[str, ...] = ()
     error: str | None = None  # set when the file couldn't be used (env defaults apply)
+    settings: Settings = Settings()
 
 
 # ---- field paths --------------------------------------------------------
@@ -398,21 +460,97 @@ def _text_extras(r: _Reader, kind: str) -> tuple[tuple, str | None]:
     return labels, empty
 
 
-def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dict) -> RobotMap:
+def _points(raw: Any, where: str, problems: list[str]) -> tuple:
+    """Saved waypoints: {name, x, y, theta}."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        problems.append(f"{where}: expected a list of {{name, x, y, theta}}")
+        return ()
+    out = []
+    for i, p in enumerate(raw):
+        r = _Reader(p, f"{where}[{i}]", problems, {"name", "x", "y", "theta"})
+        if r.has("name") and r.has("x") and r.has("y"):
+            out.append((r.str("name"), r.num("x"), r.num("y"), r.num("theta", 0.0)))
+        else:
+            problems.append(f"{where}[{i}]: needs name, x and y")
+    return tuple(out)
+
+
+def _link(data: dict, where: str, problems: list[str], namespace: str) -> Link:
+    r = _Reader({k: v for k, v in data.items() if k in ROBOT_KEYS}, where.rstrip("."), problems, ROBOT_KEYS)
+    protocol = r.str("protocol", "ros2")
+    if protocol not in PROTOCOLS:
+        problems.append(f"{where}protocol: one of {', '.join(PROTOCOLS)}")
+        protocol = "ros2"
+
+    def topic(key):
+        return resolve(r.topic(key), namespace) if r.has(key) else None
+
+    offset = _Reader(data.get("map_offset"), f"{where}map_offset", problems, {"x", "y", "theta"})
+    limits = (r.num("max_linear", Link.max_linear, positive=True), r.num("max_angular", Link.max_angular, positive=True))
+    common = dict(protocol=protocol, vendor=r.str("vendor"), model=r.str("model"), max_linear=limits[0],
+                  max_angular=limits[1], points=_points(data.get("points"), f"{where}points", problems),
+                  map_offset=(offset.num("x", 0.0), offset.num("y", 0.0), offset.num("theta", 0.0)))
+    ros_only = [k for k in ("cmd_vel", "nav2_action", "pause_topic", "pose", "odom") if r.has(k)]
+    vda_only = [k for k in ("manufacturer", "serial", "username", "password_env", "instant_actions") if r.has(k)]
+    if protocol == "ros2":
+        for k in vda_only:
+            problems.append(f"{where}{k}: only for protocol: vda5050")
+        return Link(**common, cmd_vel=topic("cmd_vel"), nav2_action=topic("nav2_action"),
+                    pause_topic=topic("pause_topic"), pose=topic("pose"), odom=topic("odom"))
+    for k in ros_only:
+        problems.append(f"{where}{k}: only for protocol: ros2")
+    for k in ("manufacturer", "serial"):
+        if not r.has(k):
+            problems.append(f"{where}{k}: required for protocol: vda5050")
+    actions = data.get("instant_actions", INSTANT_ACTIONS)
+    if not isinstance(actions, (list, tuple)) or not all(isinstance(a, str) for a in actions):
+        problems.append(f"{where}instant_actions: expected a list of action names")
+        actions = INSTANT_ACTIONS
+    return Link(**common, manufacturer=r.str("manufacturer"), serial=str(data.get("serial", "")) or None,
+                username=r.str("username"), password_env=r.str("password_env"), instant_actions=tuple(actions))
+
+
+def _vda_robot(data: dict, name: str, stale: float | None, link: Link, section, where: str,
+               problems: list[str]) -> RobotMap:
+    """A VDA 5050 robot: the same tiles, read from its `state` message."""
+    b = _Reader(section("battery"), f"{where}battery", problems,
+                {"warn_below", "fault_below", "min_voltage", "hysteresis", "stale_after"})
+    after = stale if stale is not None else VDA_STALE_AFTER
+    bstale = b.num("stale_after", after, positive=True)
+    values = (Value("battery", "Battery", "state", "batteryState.batteryCharge", "%", "number", 1.0,
+                    Rule(warn_below=b.num("warn_below", 25.0), fault_below=b.num("fault_below", 10.0),
+                         hysteresis=b.num("hysteresis", 2.0)), bstale),
+              Value("voltage", "Voltage", "state", "batteryState.batteryVoltage", "V", "number", 1.0,
+                    Rule(warn_below=b.num("min_voltage"), hysteresis=0.2), bstale))
+    return RobotMap(name=name, values=values, diagnostics_topic=None, stale_after=after, link=link)
+
+
+def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dict, entry: bool = False) -> RobotMap:
     def section(name):
         own, shared = data.get(name), defaults.get(name)
         if isinstance(own, dict) and isinstance(shared, dict):
             return {**shared, **own}
         return own if own is not None else shared
 
-    _Reader(data, where.rstrip("."), problems, SECTIONS)  # unknown top-level keys
-    robot = _Reader(section("robot"), f"{where}robot", problems, {"name", "namespace", "domain_id"})
+    # unknown top-level keys
+    _Reader(data, where.rstrip("."), problems, SECTIONS | (ROBOT_KEYS if entry else SITE_SECTIONS))
+    own = {k: data[k] for k in ("name", "namespace", "domain_id") if entry and k in data}
+    base = section("robot")
+    robot = _Reader({**base, **own} if isinstance(base, dict) else (own or base), f"{where}robot", problems,
+                    {"name", "namespace", "domain_id"})
     name = robot.str("name") or env.get("STYRI_ROBOT_NAME") or os.uname().nodename
     namespace = robot.str("namespace", "") or ""
     domain = robot.num("domain_id")
     if domain is not None and not (0 <= domain <= 232 and domain == int(domain)):
         problems.append(f"{where}robot.domain_id: must be a whole number from 0 to 232")
         domain = None
+    link = _link(data, where, problems, namespace) if entry else Link()
+    if link.protocol == "vda5050":
+        own_stale = _Reader({"stale_after": section("stale_after")}, where.rstrip("."), problems, {"stale_after"}) \
+            .num("stale_after", None, positive=True)
+        return _vda_robot(data, name, own_stale, link, section, where, problems)
     stale = _Reader({"stale_after": section("stale_after")}, where.rstrip("."), problems, {"stale_after"}) \
         .num("stale_after", float(env.get("STYRI_STALE_AFTER") or 5.0), positive=True)
 
@@ -511,7 +649,7 @@ def _robot(data: dict, defaults: dict, where: str, problems: list[str], env: dic
         problems.append(f"{where}fields: label “{dup}” is used twice")
     return RobotMap(name=name, namespace=namespace, domain_id=None if domain is None else int(domain),
                     values=tuple(values), diagnostics_topic=diag_topic, host_fallback=host_fallback,
-                    stale_after=stale)
+                    stale_after=stale, link=link)
 
 
 def from_dict(data: Any, env: dict | None = None) -> tuple[list[RobotMap], list[str]]:
@@ -525,27 +663,52 @@ def from_dict(data: Any, env: dict | None = None) -> tuple[list[RobotMap], list[
         raise ConfigError(["the file must be a mapping (key: value lines), not a list or text"])
     if "robots" in data:
         entries = data["robots"]
-        defaults = {k: v for k, v in data.items() if k != "robots"}
+        defaults = {k: v for k, v in data.items() if k != "robots" and k not in SITE_SECTIONS}
         for k in defaults:
             if k not in SECTIONS:
                 problems.append(f"{k}: unknown key")
         if not isinstance(entries, list) or not entries:
             raise ConfigError(problems + ["robots: expected a list with at least one robot"])
-        robots = [_robot(e if isinstance(e, dict) else {}, defaults, f"robots[{i}].", problems, env)
+        robots = [_robot(e if isinstance(e, dict) else {}, defaults, f"robots[{i}].", problems, env, entry=True)
                   for i, e in enumerate(entries)]
         names = [r.name for r in robots]
         for dup in {n for n in names if names.count(n) > 1}:
             problems.append(f"robots: name “{dup}” is used twice")
-        ids = [(r.namespace.strip("/"), r.domain_id) for r in robots]
+        ids = [(r.namespace.strip("/"), r.domain_id) if r.link.protocol == "ros2"
+               else (r.link.manufacturer, r.link.serial) for r in robots]
         for i, key in enumerate(ids):
             if key in ids[:i]:
                 problems.append(f"robots[{i}]: same namespace and domain_id as an earlier robot; give each robot "
-                                "its own namespace or domain_id")
+                                "its own namespace or domain_id" if robots[i].link.protocol == "ros2" else
+                                f"robots[{i}]: same manufacturer and serial as an earlier robot")
     else:
         robots = [_robot(data, {}, "", problems, env)]
+    _settings(data, env, problems)
     if problems:
         raise ConfigError(problems)
     return robots, notes
+
+
+def _settings(data: dict, env: dict, problems: list[str]) -> Settings:
+    site = _Reader(data.get("site"), "site", problems, {"name", "map", "graph"})
+    control = _Reader(data.get("control"), "control", problems, {"enabled", "session_hours"})
+    vda = _Reader(data.get("vda"), "vda", problems, {"broker", "interface"})
+    b = _Reader(vda.data.get("broker"), "vda.broker", problems, {"bundled", "url", "bind", "port", "tls_cert", "tls_key"})
+    url = b.str("url")
+    if b.has("bundled") and b.bool("bundled", True) and url:
+        problems.append("vda.broker: use either bundled: true or url, not both")
+    if b.has("bundled") and not b.bool("bundled", True) and not url:
+        problems.append("vda.broker.url: required with bundled: false")
+    if url and not re.fullmatch(r"mqtts?://[^/\s]+", url):
+        problems.append("vda.broker.url: like mqtt://broker.local:1883")
+    if b.has("tls_cert") != b.has("tls_key"):
+        problems.append("vda.broker: tls_cert and tls_key go together")
+    enabled = control.bool("enabled", False) or (env.get("STYRI_CONTROL") or "").strip().lower() in ("1", "true", "yes")
+    return Settings(site_name=site.str("name"), map=site.str("map"), graph=site.str("graph"), control=enabled,
+                    session_hours=control.num("session_hours", Settings.session_hours, positive=True),
+                    interface=vda.str("interface", Settings.interface),
+                    broker=Broker(url=url, bind=b.str("bind"), port=int(b.num("port", Broker.port, positive=True)),
+                                  tls_cert=b.str("tls_cert"), tls_key=b.str("tls_key")))
 
 
 def from_env(env: dict | None = None) -> RobotMap:
@@ -568,7 +731,7 @@ def config_path(env: dict | None = None) -> str | None:
     return DEFAULT_PATH if Path(DEFAULT_PATH).is_file() else None
 
 
-def load_file(path: str, env: dict | None = None) -> tuple[list[RobotMap], list[str]]:
+def _read(path: str) -> Any:
     try:
         text = Path(path).read_text(encoding="utf-8")
     except OSError as exc:
@@ -579,7 +742,11 @@ def load_file(path: str, env: dict | None = None) -> tuple[list[RobotMap], list[
         mark = getattr(exc, "problem_mark", None)
         where = f" (line {mark.line + 1})" if mark else ""
         raise ConfigError([f"not valid YAML{where}: {getattr(exc, 'problem', None) or exc}"]) from None
-    return from_dict(data, env)
+    return data
+
+
+def load_file(path: str, env: dict | None = None) -> tuple[list[RobotMap], list[str]]:
+    return from_dict(_read(path), env)
 
 
 def load(path: str | None = None, env: dict | None = None) -> Loaded:
@@ -587,10 +754,12 @@ def load(path: str | None = None, env: dict | None = None) -> Loaded:
     env = dict(os.environ) if env is None else env
     path = path or config_path(env)
     if path is None:
-        return Loaded((from_env(env),), "environment")
+        return Loaded((from_env(env),), "environment", settings=_settings({}, env, []))
     try:
-        robots, notes = load_file(path, env)
+        data = _read(path)
+        robots, notes = from_dict(data, env)
     except ConfigError as exc:
+        # A file that can't be read leaves control off, whatever the environment says.
         fallback = replace(from_env(env), values=())
         return Loaded((fallback,), path, error="; ".join(exc.problems))
-    return Loaded(tuple(robots), path, tuple(notes))
+    return Loaded(tuple(robots), path, tuple(notes), settings=_settings(data if isinstance(data, dict) else {}, env, []))

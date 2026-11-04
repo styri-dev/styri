@@ -1,4 +1,4 @@
-"""The Core server end to end: read-only protocol, one port for UI + data."""
+"""The Core server end to end: view-only protocol, one port for UI + data."""
 
 import asyncio
 import json
@@ -17,7 +17,7 @@ def http_get(url, path):
 
 
 @pytest.mark.parametrize("msg", [
-    {"action": "ESTOP"},
+    {"action": "SHUTDOWN"},
     {"action": "DISPATCH", "target": "DOCK"},
     {"action": "CMD_VEL", "linear": 0.3},
     {"action": "LOGIN", "username": "a", "password": "b"},
@@ -28,7 +28,7 @@ def test_everything_but_reads_is_refused(msg):
         ws = await connect_panel(url)
         await send(ws, **msg)
         reply = await recv_reply(ws)
-        assert reply["type"] == "error" and "read-only" in reply["error"]
+        assert reply["type"] == "error" and "view-only" in reply["error"]
         await ws.close()
 
     audit = run_bridge(t)
@@ -52,9 +52,10 @@ def test_hello_activity_history_and_live_events():
     async def t(url, server, audit):
         ws = await connect(url)
         hello = json.loads(await ws.recv())
-        assert hello == {"type": "hello", "version": hello["version"], "robot": "test-bot", "domain": hello["domain"],
+        assert hello == {"type": "hello", "api": 2, "not_shown": [], "version": hello["version"], "robot": "test-bot", "domain": hello["domain"],
                          "stale_after": 5.0, "controls": False, "min_voltage": None, "config": hello["config"],
-                         "robots": [{"index": 0, "name": "test-bot", "domain": hello["domain"], "namespace": None}]}
+                         "robots": [{"index": 0, "name": "test-bot", "domain": hello["domain"], "protocol": "ros2",
+                                     "namespace": None}]}
         assert hello["config"]["source"] == "environment" and hello["config"]["error"] is None
         history = json.loads(await ws.recv())
         assert history["type"] == "activity"

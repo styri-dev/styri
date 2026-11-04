@@ -1,11 +1,11 @@
 """The one server Styri runs: operator UI, live data and a probe on one port.
 
   GET  /           the operator UI (static files from the Vite build)
-  WS   /ws         snapshots, activity log, topic inspection
+  WS   /ws         snapshots, the fleet, activity log, topic inspection
   GET  /healthz    liveness probe
 
-Styri Core is read-only. Browsers can ask for data (PING, SELECT) and
-nothing else; the bridge never publishes to the robot.
+With control off, which is the default, browsers can ask for data (PING,
+SELECT) and nothing else, and the bridge never sends anything to a robot.
 """
 
 from __future__ import annotations
@@ -24,9 +24,10 @@ from websockets.asyncio.server import ServerConnection, broadcast, serve
 from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request, Response
 
-from . import __version__, protocol
+from . import __version__, model, protocol
 from .audit import Activity, AuditLog
 from .config import Config
+from .model import RobotView
 from .monitor import Monitor
 from .static import StaticFiles
 
@@ -34,7 +35,9 @@ logger = logging.getLogger("styri_bridge")
 
 SNAPSHOT_PERIOD = 1.0  # seconds
 MAX_PREVIEW = 8000  # characters of a message shown on the Topics tab
-READ_ONLY = "Styri Core is read-only: it never sends anything to the robot."
+READ_ONLY = "Control is off: this panel is view-only and sends nothing to the robot."
+CORE_ROBOTS = 3  # how many robots Core shows; a license may raise it
+PRICING = "https://styri.dev/pricing"
 
 
 def _format_plain(value, indent: int = 0) -> str:
@@ -88,15 +91,6 @@ Action = Callable[[Session, dict], Awaitable[dict | None]]
 Route = Callable[[ServerConnection, Request], Response | None]
 
 
-@dataclass
-class RobotView:
-    """One robot the panel shows. Styri Core has exactly one; extensions may add more."""
-    index: int
-    name: str
-    domain: str
-    monitor: Monitor
-
-
 class _Tagged:
     """Activity from one of several robots: the robot's name goes in front."""
 
@@ -120,6 +114,10 @@ class BridgeServer:
         self.domain = str(cfg.robot.domain_id) if cfg.robot.domain_id is not None \
             else os.environ.get("ROS_DOMAIN_ID", "0")
         self.robots: list[RobotView] = [RobotView(0, cfg.robot_name, self.domain, self.monitor)]
+        self._tap(self.robots[0])
+        self.robot_limit = CORE_ROBOTS
+        self.not_shown: list[dict] = []
+        self._built = False
         self.clients: set[ServerConnection] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._snapshots: dict[int, dict] = {}
@@ -129,7 +127,7 @@ class BridgeServer:
         self.hello_extra: dict = {}
         self.on_connect: list[Callable[[Session], None]] = []
         self.on_disconnect: list[Callable[[Session], None]] = []
-        self.on_ros_node: list[Callable[[object], None]] = []
+        self.on_ros_node: list[Callable[[RobotView, object], None]] = []  # before the node spins
         self.background: list[Callable[[], Awaitable[None]]] = []
         self.on_shutdown: list[Callable[[], None]] = []
 
@@ -155,6 +153,7 @@ class BridgeServer:
 
     async def run(self, stop: asyncio.Future) -> None:
         self._loop = asyncio.get_running_loop()
+        self.build_robots()
         async with serve(self._handler, self.cfg.host, self.cfg.port,
                          process_request=self._process_request, max_size=16 * 1024):
             logger.info("Styri v%s on http://%s:%d", __version__, self.cfg.host, self.cfg.port)
@@ -176,13 +175,43 @@ class BridgeServer:
                 for hook in self.on_shutdown:
                     hook()
 
+    def set_robot_limit(self, limit: int) -> None:
+        """A license's robot count. Call before build_robots()."""
+        self.robot_limit = limit
+
+    def build_robots(self) -> None:
+        """Show the file's robots, in its order, up to the limit; list the rest as not shown."""
+        if self._built:
+            return
+        self._built = True
+        listed = self.cfg.mapping.robots
+        for robot in listed[len(self.robots):self.robot_limit]:
+            self.add_robot(robot)
+        self.not_shown = [{"name": r.name, "protocol": r.link.protocol,
+                           "reason": f"Not shown: free tier covers {CORE_ROBOTS} robots"
+                           if self.robot_limit == CORE_ROBOTS else f"Not shown: license covers {self.robot_limit} robots",
+                           "link": PRICING} for r in listed[self.robot_limit:]]
+        for robot in self.not_shown:
+            self.activity.add("warning", f"{robot['name']}: {robot['reason']}", "configuration")
+
+    def _tap(self, view: RobotView) -> None:
+        """Have the robot's ROS topics feed its live model."""
+        link, live, taps = view.map.link, view.live, view.monitor.taps
+        if link.pose:
+            taps[link.pose] = lambda msg: model.ros_pose(live, msg)
+        if link.odom:
+            taps[link.odom] = lambda msg: model.ros_odom(live, msg)
+        if link.nav2_status():
+            taps[link.nav2_status()] = lambda msg: model.nav2_status(live, msg)
+
     def add_robot(self, robot) -> RobotView:
-        """Show another robot (a mapping.RobotMap). Extensions feed its monitor."""
+        """Show another robot (a mapping.RobotMap). Its adapter feeds the monitor."""
         if len(self.robots) == 1:
             self.monitor.activity = _Tagged(self.activity, self.robots[0].name)
         domain = str(robot.domain_id) if robot.domain_id is not None else os.environ.get("ROS_DOMAIN_ID", "0")
         view = RobotView(len(self.robots), robot.name, domain,
                          Monitor(_Tagged(self.activity, robot.name), robot))
+        self._tap(view)
         self.robots.append(view)
         return view
 
@@ -190,10 +219,7 @@ class BridgeServer:
         """Where the mapping came from, for the panel's Configuration view."""
         loaded, robot = self.cfg.mapping, self.cfg.robot
         notes = list(loaded.notes)
-        if len(loaded.robots) > len(self.robots) == 1:
-            notes.append(f"This file lists {len(loaded.robots)} robots. Styri Core shows the first, "
-                         f"{robot.name}; Styri Pilot shows up to five.")
-        elif len(loaded.robots) > len(self.robots):
+        if len(loaded.robots) > len(self.robots):
             notes.append(f"This file lists {len(loaded.robots)} robots; the panel shows the first {len(self.robots)}.")
         return {"source": loaded.source, "error": loaded.error, "notes": notes,
                 "robots_in_file": len(loaded.robots), "namespace": robot.namespace or None,
@@ -206,6 +232,12 @@ class BridgeServer:
         self._snapshots[index] = snap
         return snap
 
+    def fleet(self) -> dict:
+        """Every shown robot's model, from the latest snapshots."""
+        return {"type": "fleet", "site": self.cfg.mapping.settings.site_name, "not_shown": self.not_shown,
+                "robots": [model.describe(r, self._snapshots[r.index]) for r in self.robots
+                           if r.index in self._snapshots]}
+
     @property
     def _snapshot(self) -> dict | None:
         return self._snapshots.get(0)
@@ -217,6 +249,10 @@ class BridgeServer:
                     self.publish_threadsafe(self.snapshot(r.index))
                 except Exception:  # never let one bad reading stop the panel
                     logger.exception("snapshot failed for %s", r.name)
+            try:
+                self.publish_threadsafe(self.fleet())
+            except Exception:
+                logger.exception("fleet message failed")
             await asyncio.sleep(SNAPSHOT_PERIOD)
 
     # ---- HTTP -----------------------------------------------------------
@@ -239,10 +275,11 @@ class BridgeServer:
 
     async def _handler(self, ws: ServerConnection) -> None:
         session = Session(ws, client=peer_ip(ws))
-        hello = {"type": "hello", "version": __version__, "robot": self.cfg.robot_name,
+        hello = {"type": "hello", "api": 2, "version": __version__, "robot": self.cfg.robot_name,
                  "domain": self.domain, "stale_after": self.cfg.stale_after, "controls": False,
+                 "not_shown": self.not_shown,
                  "min_voltage": self.cfg.min_voltage, "config": self.config_summary(),
-                 "robots": [{"index": r.index, "name": r.name, "domain": r.domain,
+                 "robots": [{"index": r.index, "name": r.name, "domain": r.domain, "protocol": r.map.link.protocol,
                              "namespace": r.monitor.robot.namespace or None} for r in self.robots],
                  **self.hello_extra}
         await ws.send(json.dumps(hello))
