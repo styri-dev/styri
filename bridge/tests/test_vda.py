@@ -252,6 +252,20 @@ def test_graph_routes_and_refuses_bad_files():
         Graph.from_dict({"nodes": [{"id": "a"}], "edges": []})
 
 
+def test_non_numbers_are_refused():
+    with pytest.raises(GraphError, match="numbers"):
+        Graph.from_dict({"nodes": [{"id": "a", "x": float("nan"), "y": 0, "map_id": "m"}], "edges": []})
+
+
+def test_a_graph_file_not_made_yet_is_an_empty_graph(tmp_path):
+    from styri_bridge.sitemap import Site
+    site = Site(None, str(tmp_path / "new.json"))
+    assert site.graph.nodes == {} and site.problems == []
+    site.save(Graph.from_dict(GRAPH))
+    assert Site(None, str(tmp_path / "new.json")).graph.route("a", "c")
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_directed_edges_run_one_way():
     g = Graph.from_dict({"nodes": GRAPH["nodes"][:2], "edges": [{"id": "ab", "start": "a", "end": "b", "directed": True}]})
     assert g.route("a", "b") and g.route("b", "a") is None

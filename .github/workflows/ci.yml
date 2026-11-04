@@ -124,6 +124,15 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           npx playwright test --config mixed.config.ts
+      - name: Map editor
+        run: |
+          docker compose down -t 2
+          docker compose -f compose.yaml -f ../../e2e/mixed-fleet/editor.yaml up -d
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 1 http://localhost:8080/healthz
+      - working-directory: e2e
+        env:
+          E2E_EDITOR: "1"
+        run: npx playwright test --config mixed.config.ts editor
 
   e2e:
     name: e2e (${{ matrix.arch }}, styri ${{ matrix.rmw }}, robot ${{ matrix.robot }})

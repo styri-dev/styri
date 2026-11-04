@@ -1,0 +1,7 @@
+# The demo with a node graph Styri can write, in its data folder, starting empty.
+services:
+  styri:
+    environment:
+      STYRI_CONFIG: /etc/styri/styri-editor.yaml
+    volumes:
+      - ../../e2e/mixed-fleet/styri-editor.yaml:/etc/styri/styri-editor.yaml:ro

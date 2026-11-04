@@ -90,6 +90,7 @@ export interface GraphNode {
 export interface Site {
   graph: { nodes: GraphNode[]; edges: { id: string; start: string; end: string }[] } | null;
   background: { url: string; scale: number; origin: [number, number] } | null;
+  editable: boolean; // site.graph is set, so the editor has a file to save
   problems: string[];
 }
 
@@ -279,6 +280,9 @@ export function useBridge(url: string) {
             break;
           case "fleet":
             setState((s) => ({ ...s, fleet: msg.robots }));
+            break;
+          case "site": // someone saved the node graph
+            setState((s) => ({ ...s, hello: s.hello && { ...s.hello, site: msg.site } }));
             break;
           case "auth":
             // The cookie is HttpOnly, so the bridge sets it: a reload stays logged in.

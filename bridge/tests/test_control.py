@@ -79,7 +79,7 @@ async def ask(ws, **msg):
     await ws.send(json.dumps(msg))
     while True:
         reply = json.loads(await asyncio.wait_for(ws.recv(), 3))
-        if reply["type"] not in ("event", "snapshot", "fleet", "hello", "activity"):
+        if reply["type"] not in ("event", "snapshot", "fleet", "hello", "activity", "site"):
             return reply
 
 
@@ -381,6 +381,93 @@ def test_with_control_off_there_are_no_commands():
             assert "view-only" in reply["error"]
         assert not server.actions
     run_bridge(go)
+
+
+GRAPH = {"nodes": [{"id": "a", "x": 0, "y": 0, "map_id": "m"}, {"id": "b", "x": 4, "y": 0, "map_id": "m"}],
+         "edges": [{"id": "ab", "start": "a", "end": "b"}]}
+
+
+def editing(tmp_path, test):
+    """A bridge whose site.graph is a file in tmp_path that doesn't exist yet."""
+    path = tmp_path / "graph.json"
+    robots, _ = mapping.from_dict(FILE, {})
+    settings = mapping.Settings(control=True, graph=str(path))
+    cfg = Config(audit_db=":memory:", ui_dir=None, mapping=mapping.Loaded(tuple(robots), "test", settings=settings))
+    holder = {}
+
+    def setup(server):
+        holder["c"] = Control(server, admin=Admin(None, env={"STYRI_ADMIN_PASSWORD": PASSWORD}), sinks={0: Sink()}).attach()
+
+    async def wrapped(url, server, audit):
+        await test(url, server, audit, holder["c"], path)
+    return run_bridge(wrapped, setup=setup, cfg=cfg)
+
+
+def test_saving_the_graph_writes_the_same_json_and_tells_everyone(tmp_path):
+    async def go(url, server, audit, control, path):
+        class Vda:
+            graph = None
+        control.vda = Vda()
+        async with connect(url) as ws, connect(url) as watcher:
+            hello = json.loads(await watcher.recv())
+            assert hello["site"]["editable"] and hello["site"]["graph"] == {"nodes": [], "edges": []}
+            await login(ws)
+            assert (await ask(ws, action="GRAPH_SAVE", graph=GRAPH))["type"] == "ack"
+            while (msg := json.loads(await asyncio.wait_for(watcher.recv(), 3)))["type"] != "site":
+                pass
+        assert msg["site"]["graph"] == GRAPH
+        assert json.loads(path.read_text()) == GRAPH
+        assert control.vda.graph.route("a", "b") and server.site.graph.nodes["b"].x == 4
+        (row,) = [r for r in audit.commands() if r["command"] == "GRAPH_SAVE"]
+        assert row["user"] == "admin" and row["payload"] == {"nodes": 2, "edges": 1}
+    editing(tmp_path, go)
+
+
+def test_saving_the_graph_needs_the_login(tmp_path):
+    async def go(url, server, audit, control, path):
+        async with connect(url) as ws:
+            assert "Log in" in (await ask(ws, action="GRAPH_SAVE", graph=GRAPH))["error"]
+        assert not path.exists() and audit.commands()[0]["kind"] == "command_rejected"
+    editing(tmp_path, go)
+
+
+@pytest.mark.parametrize("graph, needle", [
+    ({"nodes": [{"id": "a"}], "edges": []}, "need id"),
+    ({"nodes": [], "edges": [{"id": "e", "start": "a", "end": "b"}]}, "isn't in the graph"),
+    ("nonsense", "need id"),
+])
+def test_a_bad_graph_changes_nothing(tmp_path, graph, needle):
+    async def go(url, server, audit, control, path):
+        async with connect(url) as ws:
+            await login(ws)
+            assert (await ask(ws, action="GRAPH_SAVE", graph=GRAPH))["type"] == "ack"
+            reply = await ask(ws, action="GRAPH_SAVE", graph=graph)
+            assert reply["type"] == "error" and needle in reply["error"]
+        assert json.loads(path.read_text()) == GRAPH and len(server.site.graph.nodes) == 2
+    editing(tmp_path, go)
+
+
+def test_a_read_only_mount_says_what_to_do(tmp_path):
+    async def go(url, server, audit, control, path):
+        def fail(graph):
+            raise OSError(30, "Read-only file system")
+        server.site.save = fail
+        async with connect(url) as ws:
+            await login(ws)
+            reply = await ask(ws, action="GRAPH_SAVE", graph=GRAPH)
+        assert "Read-only file system" in reply["error"] and ":ro" in reply["error"]
+        assert server.site.graph.nodes == {}  # still the graph that's on disk
+    editing(tmp_path, go)
+
+
+def test_a_big_graph_fits_in_one_message(tmp_path):
+    big = {"nodes": [{"id": f"n{i}", "x": i, "y": i, "map_id": "plant-a"} for i in range(1000)], "edges": []}
+
+    async def go(url, server, audit, control, path):
+        async with connect(url, max_size=None) as ws:
+            await login(ws)
+            assert (await ask(ws, action="GRAPH_SAVE", graph=big))["type"] == "ack"
+    editing(tmp_path, go)
 
 
 def test_the_log_is_append_only():

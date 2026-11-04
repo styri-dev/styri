@@ -23,6 +23,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from ..model import RobotView, capabilities, is_stale
 from ..server import BridgeServer, Session, peer_ip
+from ..sitemap import Graph, GraphError
 from . import commands
 from .auth import ADMIN, ANONYMOUS, Admin, token_from
 from .commands import CommandError
@@ -65,6 +66,7 @@ class Control:
         b.actions["SETUP"] = self._setup
         b.actions["LOGOUT"] = self._logout
         b.actions["AUDIT"] = self._audit_rows
+        b.actions["GRAPH_SAVE"] = self._graph_save
         b.routes["/api/session"] = self._set_cookie
         b.routes["/api/logout"] = self._clear_cookie
         b.routes["/audit.jsonl"] = self._export
@@ -195,6 +197,33 @@ class Control:
         response.headers["Content-Disposition"] = 'attachment; filename="styri-audit.jsonl"'
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    # ---- the node graph ---------------------------------------------------------
+
+    async def _graph_save(self, session: Session, data: dict) -> dict:
+        """The map editor's save. An order already running keeps its route."""
+        if not self.admin.valid(session.data.get("token")):
+            return self._reject(session, "GRAPH_SAVE", "Log in to edit the map.")
+        site = self.bridge.site
+        try:
+            graph = Graph.from_dict(data.get("graph"))
+            if len(graph.nodes) > commands.MAX_NODES:
+                raise GraphError(f"at most {commands.MAX_NODES} nodes")
+        except GraphError as exc:
+            return self._reject(session, "GRAPH_SAVE", f"Graph not saved: {exc}.")
+        try:
+            await asyncio.to_thread(site.save, graph)
+        except OSError as exc:
+            return self._reject(session, "GRAPH_SAVE", f"Can't write {site.graph_path}: {exc.strerror or exc}. "
+                                                       "Its folder must be writable by Styri (uid 10001), not mounted :ro.")
+        if self.vda is not None:
+            self.vda.graph = graph
+        self.audit.record("command", client=session.client, user=ADMIN, action="GRAPH_SAVE",
+                          payload={"nodes": len(graph.nodes), "edges": len(graph.edges)},
+                          user_agent=self._agent(session))
+        self.bridge.activity.add("state", f"Node graph saved: {len(graph.nodes)} nodes, {len(graph.edges)} edges", "control")
+        self.bridge.publish_threadsafe({"type": "site", "site": site.describe()})
+        return {"type": "ack", "action": "GRAPH_SAVE"}
 
     # ---- commands -------------------------------------------------------------
 

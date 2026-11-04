@@ -38,6 +38,7 @@ logger = logging.getLogger("styri_bridge")
 SNAPSHOT_PERIOD = 1.0  # seconds
 MAX_PREVIEW = 8000  # characters of a message shown on the Topics tab
 READ_ONLY = "Control is off: this panel is view-only and sends nothing to the robot."
+MAX_MESSAGE = 256 * 1024  # bytes from a browser: room for a site's node graph
 CORE_ROBOTS = 3  # how many robots Core shows; a license may raise it
 PRICING = "https://styri.dev/pricing"
 
@@ -161,7 +162,7 @@ class BridgeServer:
         self._loop = asyncio.get_running_loop()
         self.build_robots()
         async with serve(self._handler, self.cfg.host, self.cfg.port,
-                         process_request=self._process_request, max_size=16 * 1024):
+                         process_request=self._process_request, max_size=MAX_MESSAGE):
             logger.info("Styri v%s on http://%s:%d", __version__, self.cfg.host, self.cfg.port)
             if not self.static.available():
                 logger.warning("No UI build at %s; only the WebSocket is served", self.cfg.ui_dir)

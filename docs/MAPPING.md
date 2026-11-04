@@ -290,7 +290,15 @@ broker instead, with `username` and `password_env` if it needs a login.
  "edges": [{"id": "e12", "start": "n1", "end": "n2"}]}
 ```
 
-Edges run both ways unless they have `"directed": true`. Tapping the map sends a
+Edges run both ways unless they have `"directed": true`. You can write the file by
+hand, or draw it: on the **Map** tab, log in and press **Edit graph** to add, move,
+connect and delete nodes, then **Save graph**. It writes this same JSON, and the
+new graph applies at once, with no restart. Orders already running keep their route.
+`site.graph` can name a file that doesn't exist yet. To save, the file's folder must
+be writable by Styri (uid 10001), so don't mount it `:ro`. Saving replaces the file,
+so mount the folder, not the file.
+
+Tapping the map sends a
 ROS 2 robot to that point; a VDA 5050 robot goes to the nearest node, along the
 shortest route through the graph.
 

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 ROBOT_COMMANDS = ("TELEOP", "TELEOP_RELEASE", "GOAL", "PAUSE", "RESUME", "CANCEL", "OPERATOR_STOP")
 FLEET_COMMANDS = ("OPERATOR_STOP_ALL",)
 SESSION_ACTIONS = ("LOGIN", "SETUP", "LOGOUT", "AUDIT")
+MAX_NODES = 2000
 
 
 class CommandError(ValueError):

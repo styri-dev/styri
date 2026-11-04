@@ -61,6 +61,8 @@ class Graph:
                      for e in data["edges"]]
         except (KeyError, TypeError, ValueError) as exc:
             raise GraphError(f"nodes need id, x, y and map_id; edges need id, start and end ({exc})") from None
+        if not all(math.isfinite(n.x) and math.isfinite(n.y) for n in nodes):
+            raise GraphError("node positions must be numbers")
         return cls(nodes, edges)
 
     @classmethod
@@ -186,7 +188,9 @@ class Site:
         self.graph: Graph | None = None
         self.background: Background | None = None
         self.problems: list[str] = []
-        if graph_path:
+        if graph_path and not Path(graph_path).exists():
+            self.graph = Graph([], [])  # not drawn yet: the editor makes the file
+        elif graph_path:
             try:
                 self.graph = Graph.load(graph_path)
             except GraphError as exc:
@@ -210,10 +214,10 @@ class Site:
         b = self.background
         return {"graph": self.graph.to_dict() if self.graph else None,
                 "background": {"url": "/site/map", "scale": b.scale, "origin": list(b.origin)} if b else None,
-                "problems": self.problems}
+                "editable": bool(self.graph_path), "problems": self.problems}
 
     def save(self, graph: Graph) -> None:
-        """The editor's save: the same JSON, written whole. Raises OSError."""
+        """The editor's save: the same JSON, written whole, so a crash can't leave half a file. Raises OSError."""
         if not self.graph_path:
             raise OSError("no graph file: set site.graph in styri.yaml")
         tmp = Path(self.graph_path + ".tmp")

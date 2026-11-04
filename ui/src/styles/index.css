@@ -379,6 +379,12 @@ button { font: inherit; }
 
 /* Site map */
 .mapview__wrap { position: relative; }
+.mapedit { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.mapedit .btn.is-on { background: var(--accent); border-color: var(--accent); color: var(--g-950); }
+.sitemap.is-editing { touch-action: none; cursor: crosshair; outline: 2px solid var(--accent); }
+.sitemap.is-editing .marker { pointer-events: none; opacity: 0.45; }
+.sitemap__hit { fill: transparent; stroke: transparent; cursor: pointer; }
+.sitemap__node.is-from { fill: var(--accent); stroke: var(--accent); }
 .sitemap { display: block; width: 100%; max-height: 62vh; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-3); }
 .sitemap__edge { stroke: var(--text-3); }
 .sitemap__node { fill: var(--surface-3); stroke: var(--text-3); stroke-width: 0.05; }

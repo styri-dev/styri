@@ -103,6 +103,12 @@ that isn't in `styri.yaml`.
   cancel open until they're unpaused. The vehicle is stopped. Press Resume to
   clear it, once it's safe for the vehicle to move.
 
+## The map editor
+
+- **No Edit graph button.** Log in, and set `site.graph` in `styri.yaml`.
+- **"Can't write …".** Saving needs the graph's folder writable by Styri (uid
+  10001). Mount the folder, not `:ro`, and not just the file.
+
 ## Control
 
 - **No drawer.** Control is off. Set `control.enabled: true` or `STYRI_CONTROL=1`.

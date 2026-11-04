@@ -52,7 +52,7 @@ def test_hello_activity_history_and_live_events():
     async def t(url, server, audit):
         ws = await connect(url)
         hello = json.loads(await ws.recv())
-        assert hello == {"type": "hello", "api": 2, "not_shown": [], "site": {"graph": None, "background": None, "problems": []}, "version": hello["version"], "robot": "test-bot", "domain": hello["domain"],
+        assert hello == {"type": "hello", "api": 2, "not_shown": [], "site": {"graph": None, "background": None, "editable": False, "problems": []}, "version": hello["version"], "robot": "test-bot", "domain": hello["domain"],
                          "stale_after": 5.0, "controls": False, "min_voltage": None, "config": hello["config"],
                          "robots": [{"index": 0, "name": "test-bot", "domain": hello["domain"], "protocol": "ros2",
                                      "namespace": None}]}
