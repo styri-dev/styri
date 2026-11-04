@@ -232,7 +232,8 @@ jobs:
           if-no-files-found: ignore
 
   image:
-    if: github.event_name != 'pull_request'
+    # Only the public repo publishes: a private mirror must never push an image.
+    if: github.event_name != 'pull_request' && github.repository == 'styri-dev/styri'
     needs: [unit]
     name: image (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
@@ -346,7 +347,7 @@ jobs:
         run: docker logs styri; docker logs robot
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'styri-dev/styri'
     needs: [unit, colcon, e2e, quickstart]
     runs-on: ubuntu-24.04
     permissions:
