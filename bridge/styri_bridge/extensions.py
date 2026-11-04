@@ -5,8 +5,8 @@ An extension is a function `register(bridge)` exposed through the
 routes, hello fields, connect/disconnect hooks, background tasks and ROS
 setup through the `BridgeServer` methods it receives.
 
-Styri Core itself ships no extensions and is read-only: with none
-installed, the bridge creates no ROS publishers or services.
+Styri Core ships no extensions. What creates ROS publishers or MQTT sends is
+control (control/), and only when it's turned on.
 """
 
 from __future__ import annotations

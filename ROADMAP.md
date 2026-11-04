@@ -1,25 +1,13 @@
 # Roadmap
 
-What comes after Styri Core v0.1, in the order we expect to work on it. No
+What comes after Styri v2.0, in the order we expect to work on it. No
 dates. Ideas and requests: [hello@styri.dev](mailto:hello@styri.dev).
 
-## Controls (the Controls tab)
+## After v2.0
 
-Today the tab is a disabled preview and Core is read-only. The planned panel:
-
-- **Software stop.** One tap publishes a stop on a whitelisted topic, with
-  hold-to-reset and an audit entry for every press. Software stop. Does not
-  replace the robot's hardware E-stop.
-- **Drive joystick.** Touch teleop on `/cmd_vel` with a dead-man hold (release
-  or a dropped connection sends zero), speed limits, and one driver at a time.
-- **Waypoints.** Send saved Nav2 goals from the touchscreen, with
-  confirmation before dispatch.
-- **Operator sign-in.** Viewer and operator roles; every command is logged
-  with who sent it.
-
-## Fleet view
-
-Many robots, one screen.
+- Multi-robot missions.
+- Local users, beyond the single admin.
+- A tamper-evident audit log.
 
 ## Air-gapped delivery
 

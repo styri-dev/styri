@@ -19,7 +19,7 @@ Built for the operators running robots on site, not a cloud dashboard miles away
 Run it on any ROS 2 machine (Humble or Jazzy, amd64 or arm64):
 
 ```bash
-docker run --rm --network host ghcr.io/styri-dev/styri-core:v0.3.1
+docker run --rm --network host ghcr.io/styri-dev/styri-core:v2.0.0
 ```
 
 Open **http://localhost:8080**. Styri finds your robot's topics over DDS and shows them live.
@@ -36,6 +36,20 @@ Deploying to a client fleet? We can set it up for you. [Talk to us](https://styr
 docker compose up
 ```
 
+**A mixed fleet, no hardware?** One ROS 2 robot and two VDA 5050 vehicles on one map, all simulated:
+
+```bash
+cd examples/mixed-fleet && docker compose up --build
+```
+
+Open **http://localhost:8080** and log in with `styri-demo`.
+
+## Control and safety
+
+Styri can command ROS 2 and VDA 5050 robots from one panel: hold-to-drive teleop, waypoints, pause, resume, cancel and Operator stop, per robot and for the whole fleet. It's off by default. Turning it on takes `control.enabled: true` (or `STYRI_CONTROL=1`) and a local admin password. Viewing stays open on the LAN; every command needs the login, must be on the whitelist in your `styri.yaml`, and goes in a local append-only audit log.
+
+Operator stop is a software stop. It is not an emergency stop or a safety function. Styri has no safety certification, and safety-rated stops must be hardware on the robot or the site safety system. Read [SAFETY.md](SAFETY.md) before you turn control on.
+
 ## What you get
 
 - **Overview** — robot status, battery, voltage, CPU temperature and link health, readable at a glance on a touchscreen
@@ -43,7 +57,7 @@ docker compose up
 - **Activity log** — a local log of connections, warnings and state changes, exportable to CSV
 - **Honest data** — every value shows when it goes stale; disconnects are obvious
 
-Styri Core is **read-only**: it never publishes to your robot. Controls are on the [roadmap](#roadmap).
+A fresh install is **view-only**: it never sends anything to your robot. Control is off until you turn it on: see [Control and safety](#control-and-safety).
 
 ## Nothing phones home
 
@@ -71,7 +85,7 @@ Nothing should appear while Styri runs. (DDS discovery uses LAN multicast, 224.0
 
 Foxglove helps engineers analyze robot data. Formant runs fleets from the cloud. Styri helps operators run robots on site — fully offline, from the free tier up.
 
-**Already using [rosboard](https://github.com/dheera/rosboard) or another ROS web viewer?** Those are great for engineers exploring topics. Styri adds what operators need on the floor: a clear OK / WARNING / FAULT verdict with the reason, your own thresholds in one `styri.yaml`, values that show their age and turn STALE, `styri check` against the live robot, and a read-only panel that never publishes.
+**Already using [rosboard](https://github.com/dheera/rosboard) or another ROS web viewer?** Those are great for engineers exploring topics. Styri adds what operators need on the floor: a clear OK / WARNING / FAULT verdict with the reason, your own thresholds in one `styri.yaml`, values that show their age and turn STALE, `styri check` against the live robot, and a panel that's view-only until you turn control on.
 
 ## How it works
 
@@ -86,7 +100,7 @@ One container: a small bridge subscribes to your ROS 2 topics and serves a stati
 ## Configuration
 
 Pass settings as environment variables, for example
-`docker run -e ROS_DOMAIN_ID=7 -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.3.1`.
+`docker run -e ROS_DOMAIN_ID=7 -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v2.0.0`.
 
 | Variable | Default | |
 |---|---|---|
@@ -104,13 +118,13 @@ values of your own? Describe them in one `styri.yaml` and mount it:
 ```yaml
 robot: {name: amr-01, namespace: /robot1}
 battery: {topic: battery, percentage: charge, percentage_scale: 1, warn_below: 30}
-status: {topic: mode, field: data, fault: [ERROR, ESTOP]}
+status: {topic: mode, field: data, fault: [ERROR, STOPPED]}
 fields:
   - {label: Motor current, topic: motor/current, field: data, unit: A, warn_above: 12}
 ```
 
 ```bash
-docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.3.1 styri check
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v2.0.0 styri check
 ```
 
 `styri check` tests the file against the live robot and names anything it can't
@@ -124,8 +138,7 @@ All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). Somethin
 
 ## Roadmap
 
-- **Controls** — software stop, hold-to-drive teleop and waypoint dispatch, with sign-in and roles. A software stop never replaces the robot's hardware E-stop.
-- **Fleet view** — many robots, one screen.
+- **Multi-robot missions, local users and a tamper-evident audit log.**
 - **Air-gapped delivery** — signed offline install package, SBOM and compliance audit exports.
 
 ## Editions
@@ -147,4 +160,4 @@ Issues and pull requests are welcome. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE). Bundled third-party software is listed in [NOTICE](NOTICE). Styri comes with no warranty and no safety certification: see [SAFETY.md](SAFETY.md).

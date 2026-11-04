@@ -1,7 +1,11 @@
 name: CI
 
 # Every push and PR:
-#   unit        bridge + sim unit tests, UI build, bundle makes no external requests
+#   unit        bridge + sim unit tests, UI build, bundle makes no external requests,
+#               no banned stop wording (ci/check_wording.py)
+#   mixed-fleet one ROS 2 robot and two VDA 5050 vehicles, one panel, on a network
+#               with no route out: the v2.0 acceptance test, the panel's control
+#               UI, and view-only proving it sends nothing over MQTT
 #   colcon      styri_bridge builds as a ROS package on Humble and Jazzy (ROS index)
 #   e2e         the Playwright suite against the real image and the simulated robot,
 #               on x86 and Arm, with Fast DDS and Cyclone DDS, a Humble robot, and a
@@ -44,6 +48,7 @@ jobs:
           cache: pip
           cache-dependency-path: bridge/setup.py
       - run: pip install -e 'bridge[test]'
+      - run: python3 ci/check_wording.py .
       - run: pytest bridge
       - run: pytest sim/tests
         env:
@@ -83,6 +88,39 @@ jobs:
           colcon build --packages-select styri_bridge --event-handlers console_cohesion+
           source install/setup.bash
           ros2 pkg executables styri_bridge | grep -x "styri_bridge styri-bridge"
+
+  mixed-fleet:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: examples/mixed-fleet
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose build
+      - name: View-only sends nothing over MQTT
+        run: |
+          docker compose -f compose.yaml -f ../../e2e/mixed-fleet/view-only.yaml -f no-internet.yaml up -d
+          docker compose exec -T styri /ros_entrypoint.sh python3 - < ../../e2e/mixed-fleet/view_only.py
+          docker compose down -t 2
+      - name: Acceptance, with no internet route
+        run: |
+          docker compose -f compose.yaml -f no-internet.yaml up -d
+          docker compose exec -T -e EXPECT_NO_INTERNET=1 styri /ros_entrypoint.sh python3 - < ../../e2e/mixed-fleet/accept.py
+          docker compose down -t 2
+      - name: Panel control
+        run: |
+          docker compose up -d
+          curl -fsS --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/healthz
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test --config mixed.config.ts
 
   e2e:
     name: e2e (${{ matrix.arch }}, styri ${{ matrix.rmw }}, robot ${{ matrix.robot }})

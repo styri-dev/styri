@@ -1,0 +1,30 @@
+# A ROS 2 robot and a VDA 5050 vehicle on one map. Copy it and change the names.
+# Reference: docs/MAPPING.md, "Mixed fleets". Read SAFETY.md before enabling control.
+site:
+  name: plant-a
+  graph: /etc/styri/site/graph.json
+
+control:
+  enabled: false
+
+vda:
+  broker:
+    bind: 192.168.1.20
+  interface: uagv
+
+robots:
+  - name: amr-01
+    protocol: ros2
+    namespace: /amr01
+    cmd_vel: /amr01/cmd_vel
+    nav2_action: /amr01/navigate_to_pose
+    pose: /amr01/amcl_pose
+    max_linear: 0.5
+    max_angular: 1.0
+  - name: agv-07
+    protocol: vda5050
+    manufacturer: acme
+    serial: "SN-0007"
+    username: agv07
+    password_env: AGV07_PASS
+    map_offset: {x: 0, y: 0, theta: 0}

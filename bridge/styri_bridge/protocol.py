@@ -1,4 +1,4 @@
-"""Messages a browser may send. Styri Core is read-only: there are two."""
+"""Messages any browser may send: there are two. Commands are in control/, when it's on."""
 
 from __future__ import annotations
 

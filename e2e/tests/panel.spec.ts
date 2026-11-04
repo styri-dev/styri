@@ -91,15 +91,13 @@ test("activity log filters and exports CSV", async ({ page }) => {
   expect(csv).toMatch(/"state","styri v[\d.]+ started"/);
 });
 
-test("controls tab is a disabled preview", async ({ page }) => {
-  await page.getByRole("link", { name: /Controls/ }).click();
-  await expect(page.getByText("NOT CONNECTED — COMING SOON")).toBeVisible();
-  await expect(page.getByText("Software stop. Does not replace the robot's hardware E-stop.")).toBeVisible();
-  await expect(page.locator(".preview")).toHaveAttribute("inert", "");
-  await expect(page.getByText("E-Stop", { exact: true })).toHaveCount(0);
+test("with control off there are no control buttons", async ({ page }) => {
+  await expect(page.getByTestId("stop-all")).toHaveCount(0);
+  await expect(page.getByTestId("control-drawer")).toHaveCount(0);
+  await expect(page.getByTestId("login-toggle")).toHaveCount(0);
 });
 
-test("Core refuses control commands and the robot stays put", async ({ page }) => {
+test("view-only refuses control commands and the robot stays put", async ({ page }) => {
   const before = pose();
   const replies = await page.evaluate(async () => {
     const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -109,7 +107,7 @@ test("Core refuses control commands and the robot stays put", async ({ page }) =
       const m = JSON.parse(e.data);
       if (m.type === "error") got.push(m);
     };
-    for (const msg of [{ action: "ESTOP" }, { action: "DISPATCH", target: "DOCK" }, { action: "CMD_VEL", linear: 0.4 }]) {
+    for (const msg of [{ action: "OPERATOR_STOP", robot: 0 }, { action: "GOAL", robot: 0, x: 1, y: 1 }, { action: "TELEOP", robot: 0, linear: 0.4, angular: 0 }]) {
       ws.send(JSON.stringify(msg));
     }
     await new Promise((r) => setTimeout(r, 1500));
@@ -117,7 +115,7 @@ test("Core refuses control commands and the robot stays put", async ({ page }) =
     return got;
   });
   expect(replies).toHaveLength(3);
-  for (const r of replies) expect(r.error).toContain("read-only");
+  for (const r of replies) expect(r.error).toContain("view-only");
   const after = pose();
   expect(after.v).toBe(0);
   expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeLessThan(0.01);

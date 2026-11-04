@@ -396,6 +396,8 @@ button { font: inherit; }
   .tabs:has(.tab[href="#fleet"]) .tab[href="#topics"] { display: none; }
   .switcher__select { max-width: 150px; }
   .ftile { padding: var(--sp-4); }
-  .chip--local { display: none; }
+  .chip--local, .field__conn { display: none; }
+  .chip.chip--btn { display: flex; }
+  .stopall { padding: 0 var(--sp-3); }
   .drawer__stop { flex: 1 1 100%; margin-left: 0; padding-left: 0; border-left: 0; }
 }

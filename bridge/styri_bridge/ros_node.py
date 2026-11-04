@@ -1,7 +1,7 @@
 """ROS 2 side of the bridge. Only this module imports rclpy.
 
-Read-only by construction: the node subscribes and never publishes. It
-also turns off what rclpy creates by default (the /rosout logger, the
+View-only by construction: this node subscribes and never publishes; only
+control/sinks.py adds publishers, when control is on. It also turns off what rclpy creates by default (the /rosout logger, the
 /parameter_events publisher and the parameter services), so the robot's
 graph shows Styri with zero publishers and zero services.
 """

@@ -276,3 +276,37 @@ def test_the_bundled_broker_never_bridges_and_scopes_each_vehicle():
 
 def test_localhost_only_without_a_bind():
     assert broker.config(mapping.Broker(), "uagv", [], "/tmp/x").count("listener ") == 1
+
+
+def test_check_lines_for_a_good_and_a_silent_vehicle():
+    from styri_bridge.check import vehicle_lines
+    c, view = client()
+    v = c.vehicle(view)
+    assert [ok for ok, _, _ in vehicle_lines(v, 5)] == [False, False, True, False]
+    feed(c, "connection", {**header(), "connectionState": "ONLINE"})
+    feed(c, "state", state())
+    feed(c, "factsheet", {"protocolFeatures": {"agvActions": []}})
+    ok = {what: passed for passed, what, _ in vehicle_lines(v, 5)}
+    assert ok == {"Connection": True, "State": True, "Schema": False, "Factsheet": True}  # that factsheet is invalid
+
+
+def test_check_graph_and_control_lines(tmp_path):
+    from styri_bridge.check import control_lines, graph_lines
+    path = tmp_path / "graph.json"
+    path.write_text(json.dumps(GRAPH))
+    lines, graph = graph_lines(str(path), {"m"})
+    assert all(ok for ok, _, _ in lines) and graph
+    assert not graph_lines(str(path), {"other"})[0][1][0]
+    assert not graph_lines(str(tmp_path / "nope.json"), set())[0][0][0]
+
+    robot = mapping.RobotMap("a", link=mapping.Link(cmd_vel="/a/cmd_vel", nav2_action="/a/nav"))
+    monitor = Monitor(Log(), robot)
+    monitor.discovered([("/a/cmd_vell", "t")], lambda _t: True)
+    lines = control_lines(mapping.Settings(control=True), [robot], {"a": monitor}, str(tmp_path / "x.db"), env={})
+    ok = {what: (passed, detail) for passed, what, detail in lines}
+    assert not ok["Admin password"][0]
+    assert not ok["a cmd_vel"][0] and "Did you mean /a/cmd_vell" in ok["a cmd_vel"][1]
+    assert not ok["a Nav2 action"][0]
+    monitor.discovered([("/a/cmd_vel", "t"), ("/a/nav/_action/status", "t")], lambda _t: True)
+    lines = control_lines(mapping.Settings(control=True), [robot], {"a": monitor}, "x", env={"STYRI_ADMIN_PASSWORD": "x"})
+    assert all(passed for passed, _, _ in lines)

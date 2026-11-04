@@ -338,7 +338,7 @@ class BridgeServer:
             return {"type": "error", "error": str(exc)}
         if action in self.actions:
             return await self.actions[action](session, data)
-        self.audit.record("command_rejected", client=session.client, action=action[:64], reason="read-only")
+        self.audit.record("command_rejected", client=session.client, action=action[:64], reason="unknown command or control off")
         return {"type": "error", "action": action[:64], "error": READ_ONLY}
 
     async def _select(self, topic: str, robot: int = 0) -> dict:

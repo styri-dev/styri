@@ -13,7 +13,7 @@ as an overlay ([below](#your-own-message-types)).
 Mount it at `/etc/styri/styri.yaml`:
 
 ```bash
-docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.3.1
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v2.0.0
 ```
 
 or put it anywhere and point `STYRI_CONFIG` at it. Without a file, the
@@ -21,7 +21,7 @@ or put it anywhere and point `STYRI_CONFIG` at it. Without a file, the
 ([Configuration](DEVELOPMENT.md#configuration)). Styri reads the file once,
 at start: restart it after a change.
 
-Four presets ship in the image, under `/opt/styri/presets/` (and in
+Five presets ship in the image, under `/opt/styri/presets/` (and in
 [`presets/`](../presets/) here), ready to use as they are or to copy:
 
 | Preset | For |
@@ -30,9 +30,10 @@ Four presets ship in the image, under `/opt/styri/presets/` (and in
 | `nav2.yaml` | Any robot running Nav2: navigation status (the latest NavigateToPose goal), battery, speed |
 | `turtlebot4.yaml` | TurtleBot 4, real or in the Nav2 / Gazebo simulation, including docked or not |
 | `styri-sim.yaml` | The simulated robot in this repo: every kind of mapping |
+| `mixed-fleet.yaml` | A ROS 2 robot and a VDA 5050 vehicle on one map: copy it and change the names |
 
 ```bash
-docker run --rm --network host -e STYRI_CONFIG=/opt/styri/presets/turtlebot4.yaml ghcr.io/styri-dev/styri-core:v0.3.1
+docker run --rm --network host -e STYRI_CONFIG=/opt/styri/presets/turtlebot4.yaml ghcr.io/styri-dev/styri-core:v2.0.0
 ```
 
 ## Check a file before you deploy it
@@ -43,7 +44,7 @@ find. It exits 0 when everything passes, 1 when a mapping fails and 2 when the
 file itself can't be used. Like the panel, it only listens.
 
 ```bash
-docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v0.3.1 styri check
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v2.0.0 styri check
 ```
 
 ```
@@ -92,7 +93,7 @@ status:                       # the robot's own status, shown as a tile
   topic: robot_status
   field: data
   warn: [DEGRADED, LOW_POWER] # values that mean WARNING
-  fault: [ERROR, ESTOP]       # values that mean FAULT; anything else is shown as it is
+  fault: [ERROR, STOPPED]     # values that mean FAULT; anything else is shown as it is
   # labels: {0: IDLE, 1: DRIVING, 2: ERROR}  # optional: words for coded values; warn/fault use the words
   # when_empty: IDLE          # optional: shown when the path finds no item (an empty list)
   #                           # or the topic hasn't published anything yet
@@ -195,7 +196,7 @@ in `src` too.
 docker run --rm --network host \
   -v "$PWD/styri-msgs:/opt/styri/overlay:ro" \
   -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" \
-  ghcr.io/styri-dev/styri-core:v0.3.1
+  ghcr.io/styri-dev/styri-core:v2.0.0
 ```
 
 **3. Check it.** `styri check` (and the log at start) lists every overlay it
@@ -216,7 +217,99 @@ image's own copy, which is how to match a robot whose version of, say,
 The overlay only adds message definitions: Styri still only subscribes, and
 the Styri Pro image loads overlays the same way.
 
-## Several robots (Styri Pilot)
+## Mixed fleets
+
+One `styri.yaml` can hold ROS 2 and VDA 5050 robots together, on one site map.
+[`mixed-fleet.yaml`](../presets/mixed-fleet.yaml) is an example, and
+[`examples/mixed-fleet/`](../examples/mixed-fleet/) runs one with simulated robots.
+
+```yaml
+site:
+  name: plant-a
+  map: /etc/styri/site/map.yaml      # optional background
+  graph: /etc/styri/site/graph.json  # node graph for VDA 5050 orders
+
+control:
+  enabled: true                      # off by default: see SAFETY.md
+  session_hours: 8                   # a login ends after this long unused
+
+vda:
+  broker:
+    bind: 192.168.1.20               # LAN address for the bundled broker
+    # url: mqtt://broker.local:1883  # or a site's own broker; then the bundled one doesn't start
+  interface: uagv
+
+robots:
+  - name: amr-01
+    protocol: ros2
+    namespace: /amr01
+    cmd_vel: /amr01/cmd_vel          # what control may publish to
+    nav2_action: /amr01/navigate_to_pose
+    pause_topic: /amr01/pause        # optional std_msgs/Bool; without it, no Pause button
+    pose: /amr01/amcl_pose
+    odom: /amr01/odom                # optional: speed readout
+    max_linear: 0.5                  # m/s, enforced in the bridge
+    max_angular: 1.0                 # rad/s
+    points:                          # saved waypoints, on the site map
+      - {name: Dock, x: 0, y: 0}
+  - name: agv-07
+    protocol: vda5050
+    manufacturer: acme
+    serial: "SN-0007"
+    username: agv07                  # its login on the bundled broker
+    password_env: AGV07_PASS         # the environment variable holding the password
+    map_offset: {x: 0, y: 0, theta: 0}
+```
+
+An entry also takes everything a single robot does (`battery:`, `status:`,
+`fields:` and so on), and top-level sections are shared defaults. The older
+`robots: [{robot: {name: ...}}]` form keeps working.
+
+**Whitelist.** Control sends only to what the file names: each ROS robot's
+`cmd_vel`, `nav2_action` and `pause_topic`, and each VDA robot's
+`instant_actions` (default `startPause`, `stopPause`, `cancelOrder`,
+`factsheetRequest`). Anything else is refused in the bridge and logged.
+
+**VDA 5050 robots** are read from their `state` message: battery, errors, pose
+and order progress. Versions 2.0 and 2.1 are supported, and Styri speaks whichever
+the vehicle does. They count as stale after 35 s without a message (the
+standard asks for one every 30 s) or as soon as the vehicle is offline.
+
+**Broker.** Mosquitto ships in the image and starts when the file has a `vda:`
+section or VDA 5050 robots. It listens on localhost without a login, for Styri
+itself. With `bind`, it also listens on that LAN address, where each vehicle logs
+in with its `username` and may use only its own topics. `tls_cert` and `tls_key`
+(mounted files) add TLS. It never bridges to another broker. `url` uses a site's
+broker instead, with `username` and `password_env` if it needs a login.
+
+**The node graph** is a JSON file:
+
+```json
+{"nodes": [{"id": "n1", "x": 2, "y": 2, "map_id": "plant-a"}, {"id": "n2", "x": 8, "y": 2, "map_id": "plant-a"}],
+ "edges": [{"id": "e12", "start": "n1", "end": "n2"}]}
+```
+
+Edges run both ways unless they have `"directed": true`. Tapping the map sends a
+ROS 2 robot to that point; a VDA 5050 robot goes to the nearest node, along the
+shortest route through the graph.
+
+**The background** is a ROS `map.yaml` with its PGM or PNG, or a small YAML with
+`image`, `resolution` (metres per pixel) and `origin`.
+
+**Lining them up.** `map_offset` places a robot's own coordinates on the site map:
+rotated by `theta`, then moved by `x` and `y`.
+
+Styri doesn't do traffic management or deadlock avoidance across vendors,
+automatic task allocation, or WMS/MES integration.
+
+`styri check` adds the broker, each vehicle (connection, state, schema, factsheet),
+vehicles seen on the broker but not configured, the graph, and the control setup.
+
+## Several robots
+
+Styri Core shows the first three robots in the file. The rest are listed as
+"Not shown: free tier covers 3 robots". A Styri Pilot license raises that.
+
 
 A file may list robots instead, each told apart by namespace and/or
 `domain_id`. Sections at the top are shared defaults:

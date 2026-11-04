@@ -1,4 +1,4 @@
-"""Read-only guarantee: the live Styri node has zero publishers and zero services.
+"""View-only guarantee: with control off, the live Styri node has zero publishers and zero services.
 
 Run next to a running Styri on the same ROS_DOMAIN_ID, for example:
   docker compose exec -T styri /ros_entrypoint.sh python3 - < ci/check_readonly.py
@@ -44,7 +44,7 @@ for kind, items in (("publisher", pubs), ("service", services), ("client", clien
     for name, types in items:
         print(f"  {kind}: {name} {types}")
 if pubs or services or clients:
-    print("FAIL: Styri Core must not be able to send anything to the robot")
+    print("FAIL: with control off, Styri must not be able to send anything to the robot")
     sys.exit(1)
 if not subs:
     print("FAIL: no subscriptions; is the bridge discovering topics?")

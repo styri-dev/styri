@@ -8,7 +8,7 @@ three.
 
 1. **`ROS_DOMAIN_ID`.** Styri only sees robots on the same domain. Check the
    robot (`echo $ROS_DOMAIN_ID`) and pass the same value:
-   `docker run -e ROS_DOMAIN_ID=7 --rm --network host ghcr.io/styri-dev/styri-core:v0.3.1`
+   `docker run -e ROS_DOMAIN_ID=7 --rm --network host ghcr.io/styri-dev/styri-core:v2.0.0`
 2. **`--network host`.** DDS discovery uses UDP multicast. Without host
    networking the container can't see the robot's nodes. On macOS and
    Windows, Docker (Docker Desktop, Colima, OrbStack) runs containers in a VM
@@ -59,7 +59,7 @@ To be warned about that, set the lowest voltage you consider safe for your
 pack:
 
 ```bash
-docker run -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v0.3.1
+docker run -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v2.0.0
 ```
 
 Below that, the Voltage tile turns amber, the status shows "Battery voltage
@@ -79,6 +79,43 @@ custom messages). Styri still lists it and counts its rate; it just can't show
 the contents. `styri check` names the missing package. To read it, add the
 robot's message packages as an overlay:
 [MAPPING.md, "Your own message types"](MAPPING.md#your-own-message-types).
+
+## VDA 5050 vehicles
+
+Run `styri check`: it lists the broker, each vehicle, and anything on the broker
+that isn't in `styri.yaml`.
+
+- **Broker not reachable.** The bundled broker runs with the panel, so start Styri
+  first. If the panel says port 1883 may be in use, the machine already runs a
+  broker: stop it, point `vda.broker.url` at it, or change `vda.broker.port`.
+- **Vehicle can't connect.** It needs the LAN address in `vda.broker.bind`, and
+  its `username` with the password from `password_env`. Without `bind`, the broker
+  is on localhost only.
+- **"Seen on broker, not configured".** Its manufacturer and serial number don't
+  match an entry. Copy them from that line, exactly.
+- **Invalid messages.** Styri checks every message against the official schemas,
+  warns on that robot and carries on. The log says which field is wrong.
+- **No factsheet.** Styri asks for one when control is on. In view-only it shows
+  only a retained one.
+- **Order refused.** The first node of an order is where the vehicle is, so
+  its `lastNodeId` or position must be on the graph, and its `mapId` must match.
+- **"Held, cancel pending".** After an Operator stop, some vehicles keep the
+  cancel open until they're unpaused. The vehicle is stopped. Press Resume to
+  clear it, once it's safe for the vehicle to move.
+
+## Control
+
+- **No drawer.** Control is off. Set `control.enabled: true` or `STYRI_CONTROL=1`.
+- **Forgot the admin password.** Delete `admin.hash` next to the audit database
+  and set a new one, or set `STYRI_ADMIN_PASSWORD`, which takes priority.
+- **"Log in to control robots" after a restart.** Sessions don't survive a
+  restart, on purpose.
+- **Too many attempts.** Five wrong passwords lock that address out for a minute.
+- **Buttons missing.** The panel shows only what a robot supports: a ROS 2 robot
+  needs `cmd_vel` for the joystick, `nav2_action` for waypoints and Cancel, and
+  `pause_topic` for Pause. A VDA 5050 factsheet can rule actions out.
+- **Joystick or waypoints off.** The robot's data is STALE. Operator stop stays.
+- **Nav2 isn't answering.** `styri check` shows whether the action server is up.
 
 ## The panel says "Lost connection to bridge"
 

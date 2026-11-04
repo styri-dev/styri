@@ -32,7 +32,7 @@ receive by email after you buy, unlocks the fleet.
      -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" \
      -v "$PWD/license.json:/etc/styri/license.json:ro" \
      -v styri-data:/var/lib/styri \
-     ghcr.io/styri-dev/styri-pro:v0.3.1
+     ghcr.io/styri-dev/styri-pro:v2.0.0
    ```
 
    `/etc/styri/license.json` is where Styri looks. To keep the license

@@ -1,0 +1,7 @@
+# The demo with control off: the view-only guarantee, over MQTT too.
+services:
+  styri:
+    environment:
+      STYRI_CONTROL: ""
+    volumes:
+      - ../../e2e/mixed-fleet/styri-view-only.yaml:/etc/styri/styri.yaml:ro

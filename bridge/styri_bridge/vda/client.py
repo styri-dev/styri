@@ -66,6 +66,7 @@ class VdaClient:
         self.unconfigured: dict[tuple[str, str], float] = {}  # seen on the broker, not in styri.yaml
         self.mqtt: aiomqtt.Client | None = None
         self.connected = False
+        self.seen_broker = False
         self.on_sent = None  # test hook: (topic, message)
         for v in self.vehicles.values():
             v.view.live.online = False
@@ -93,6 +94,7 @@ class VdaClient:
             try:
                 async with aiomqtt.Client(identifier=f"styri-{os.getpid()}", **self._client_args()) as client:
                     self.mqtt, self.connected, reported = client, True, False
+                    self.seen_broker = True
                     self.activity.add("connection", "Connected to the MQTT broker", "vda")
                     await client.subscribe(f"{self.settings.interface}/+/+/+/+")
                     async for message in client.messages:

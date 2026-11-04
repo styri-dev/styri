@@ -1,0 +1,43 @@
+# One ROS 2 robot and two VDA 5050 vehicles on one map, in one panel.
+site:
+  name: demo-plant
+  graph: /etc/styri/site/graph.json
+
+control:
+  enabled: false
+
+vda:
+  broker:
+    bind: 172.30.0.10   # this container's address on the demo network
+  interface: uagv
+
+robots:
+  - name: amr-01
+    protocol: ros2
+    namespace: /amr01
+    cmd_vel: /amr01/cmd_vel
+    nav2_action: /amr01/navigate_to_pose
+    pause_topic: /amr01/pause   # this sim's way to pause; Nav2 has no standard one
+    pose: /amr01/amcl_pose
+    odom: /amr01/odom
+    max_linear: 0.5
+    max_angular: 1.0
+    points:
+      - {name: Dock, x: 0, y: 0}
+      - {name: Bay 3, x: 6, y: 4}
+  - name: agv-07
+    protocol: vda5050
+    vendor: Acme
+    model: Carrier 100
+    manufacturer: acme
+    serial: "SN-0007"
+    username: agv07
+    password_env: AGV07_PASS
+  - name: agv-08
+    protocol: vda5050
+    vendor: Acme
+    model: Carrier 100
+    manufacturer: acme
+    serial: "SN-0008"
+    username: agv08
+    password_env: AGV08_PASS

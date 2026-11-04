@@ -8,3 +8,17 @@ The operator panel bundles these fonts, each under the SIL Open Font
 License, Version 1.1 (texts in ui/src/styles/fonts/):
   Archivo          Copyright 2020 The Archivo Project Authors
   JetBrains Mono   Copyright 2020 The JetBrains Mono Project Authors
+
+Apache-2.0 covers Styri's own code only. The image also contains:
+
+  Eclipse Mosquitto (the mosquitto package, unmodified), used under the Eclipse
+    Distribution License 1.0 (BSD-3-Clause), one of its two license options.
+    Its copyright file is at /usr/share/doc/mosquitto/copyright.
+  VDA 5050 JSON schemas, Copyright 2024 Verband der Automobilindustrie, under
+    the MIT license (bridge/styri_bridge/vda/schemas/LICENSE.txt). Modified by
+    Styri: see the README.md in that folder.
+  paho-mqtt (EPL-2.0 OR BSD-3-Clause), aiomqtt (BSD-3-Clause), jsonschema (MIT)
+    and its dependencies, as installed by pip.
+
+VDA 5050 is a standard of the VDA and VDMA. Styri isn't affiliated with or
+certified by them.

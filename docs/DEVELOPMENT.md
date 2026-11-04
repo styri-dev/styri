@@ -9,7 +9,7 @@
 | [`presets/`](../presets/) | Example mapping files (`styri.yaml`), also shipped in the image |
 | [`sim/`](../sim/) | A simulated robot as a real ROS 2 node, for testing without hardware |
 | [`e2e/`](../e2e/) | Playwright suite that drives the real panel against the sim |
-| [`ci/`](../ci/) | CI checks: read-only guarantee, no-egress guard, fresh-machine quickstart |
+| [`ci/`](../ci/) | CI checks: view-only guarantee, no-egress guard, wording, fresh-machine quickstart |
 | [`Dockerfile`](../Dockerfile) | The one image: UI build + bridge on `ros:jazzy-ros-base` |
 | [`compose.yaml`](../compose.yaml) | Styri plus the sim, both on host networking |
 
@@ -82,7 +82,7 @@ Every push and pull request runs the unit tests and the e2e suite on x86 and
 Arm, with Fast DDS and Cyclone DDS, against a Humble robot, and against a
 robot on a different DDS vendor from Styri. Each e2e run also checks that:
 
-- **Styri is read-only.** The `styri_bridge` node has zero publishers,
+- **With control off, Styri is read-only.** The `styri_bridge` node has zero publishers,
   services and clients on the robot's graph, with and without a mapping file,
   and so does the node `styri check` starts.
 - **Mapping files work.** `styri check` passes the sim preset and fails a
@@ -129,6 +129,8 @@ environment variables, for example `docker run -e ROS_DOMAIN_ID=7 …`:
 | `STYRI_MIN_VOLTAGE` | unset | Volts; below it, a low-voltage warning (clears 0.2 V above) |
 | `STYRI_CPU_HOST_FALLBACK` | unset | `true`: without a CPU figure from the robot, show the Styri machine's own, labelled "Styri host CPU" |
 | `STYRI_PORT` | `8080` | |
+| `STYRI_CONTROL` | unset | `1` turns control on, like `control.enabled: true`. See [SAFETY.md](../SAFETY.md). |
+| `STYRI_ADMIN_PASSWORD` | unset | The admin password. Unset, the first-run screen sets one. |
 | `STYRI_AUDIT_DB` | `/var/lib/styri/audit.db` | Mount a volume here to keep the log |
 
 By default, health comes from `/battery_state` (warning below 25 %, fault
