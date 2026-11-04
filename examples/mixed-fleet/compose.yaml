@@ -3,6 +3,8 @@
 #   docker compose up --build        then open http://localhost:8080
 #
 # Log in with the password below to command them. Everything here is simulated.
+# The site folder is a volume, so the map editor can save: `docker compose down -v`
+# puts the example graph back.
 # With -f no-internet.yaml, the network has no route out, as in the acceptance test.
 
 x-vda: &vda
@@ -13,6 +15,16 @@ x-vda: &vda
   networks: [fleet]
 
 services:
+  # Fills the site volume from ./site, once, and hands it to Styri's user.
+  site-seed:
+    image: "${STYRI_IMAGE:-styri-core:dev}"
+    user: "0"
+    entrypoint: ["sh", "-c", "cp -n /seed/* /site/ ; chown -R 10001 /site"]
+    volumes:
+      - ./site:/seed:ro
+      - site:/site
+    network_mode: none
+
   styri:
     build: ../..
     image: "${STYRI_IMAGE:-styri-core:dev}"
@@ -22,9 +34,11 @@ services:
       STYRI_ADMIN_PASSWORD: "${STYRI_ADMIN_PASSWORD:-styri-demo}"
       AGV07_PASS: demo-07
       AGV08_PASS: demo-08
+    depends_on:
+      site-seed: {condition: service_completed_successfully}
     volumes:
       - ./styri.yaml:/etc/styri/styri.yaml:ro
-      - ./site:/etc/styri/site:ro
+      - site:/etc/styri/site
     ports: ["8080:8080"]
     networks:
       fleet:
@@ -62,6 +76,9 @@ services:
       START_NODE: n5
       START_X: "12"
       START_Y: "2"
+
+volumes:
+  site:
 
 networks:
   fleet:

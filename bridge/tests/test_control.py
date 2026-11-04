@@ -387,6 +387,10 @@ GRAPH = {"nodes": [{"id": "a", "x": 0, "y": 0, "map_id": "m"}, {"id": "b", "x": 
          "edges": [{"id": "ab", "start": "a", "end": "b"}]}
 
 
+def save(ws, server, graph):
+    return ask(ws, action="GRAPH_SAVE", graph=graph, version=server.site.version)
+
+
 def editing(tmp_path, test):
     """A bridge whose site.graph is a file in tmp_path that doesn't exist yet."""
     path = tmp_path / "graph.json"
@@ -412,7 +416,7 @@ def test_saving_the_graph_writes_the_same_json_and_tells_everyone(tmp_path):
             hello = json.loads(await watcher.recv())
             assert hello["site"]["editable"] and hello["site"]["graph"] == {"nodes": [], "edges": []}
             await login(ws)
-            assert (await ask(ws, action="GRAPH_SAVE", graph=GRAPH))["type"] == "ack"
+            assert (await save(ws, server, GRAPH))["type"] == "ack"
             while (msg := json.loads(await asyncio.wait_for(watcher.recv(), 3)))["type"] != "site":
                 pass
         assert msg["site"]["graph"] == GRAPH
@@ -426,7 +430,7 @@ def test_saving_the_graph_writes_the_same_json_and_tells_everyone(tmp_path):
 def test_saving_the_graph_needs_the_login(tmp_path):
     async def go(url, server, audit, control, path):
         async with connect(url) as ws:
-            assert "Log in" in (await ask(ws, action="GRAPH_SAVE", graph=GRAPH))["error"]
+            assert "Log in" in (await save(ws, server, GRAPH))["error"]
         assert not path.exists() and audit.commands()[0]["kind"] == "command_rejected"
     editing(tmp_path, go)
 
@@ -440,8 +444,8 @@ def test_a_bad_graph_changes_nothing(tmp_path, graph, needle):
     async def go(url, server, audit, control, path):
         async with connect(url) as ws:
             await login(ws)
-            assert (await ask(ws, action="GRAPH_SAVE", graph=GRAPH))["type"] == "ack"
-            reply = await ask(ws, action="GRAPH_SAVE", graph=graph)
+            assert (await save(ws, server, GRAPH))["type"] == "ack"
+            reply = await save(ws, server, graph)
             assert reply["type"] == "error" and needle in reply["error"]
         assert json.loads(path.read_text()) == GRAPH and len(server.site.graph.nodes) == 2
     editing(tmp_path, go)
@@ -454,9 +458,73 @@ def test_a_read_only_mount_says_what_to_do(tmp_path):
         server.site.save = fail
         async with connect(url) as ws:
             await login(ws)
-            reply = await ask(ws, action="GRAPH_SAVE", graph=GRAPH)
+            reply = await save(ws, server, GRAPH)
         assert "Read-only file system" in reply["error"] and ":ro" in reply["error"]
         assert server.site.graph.nodes == {}  # still the graph that's on disk
+    editing(tmp_path, go)
+
+
+def test_a_second_editor_is_told_to_reload(tmp_path):
+    async def go(url, server, audit, control, path):
+        async with connect(url) as one, connect(url) as two:
+            await login(one)
+            await login(two)
+            opened = server.site.version  # both open the editor now
+            assert (await ask(one, action="GRAPH_SAVE", graph=GRAPH, version=opened))["type"] == "ack"
+            later = {**GRAPH, "edges": []}
+            reply = await ask(two, action="GRAPH_SAVE", graph=later, version=opened)
+            assert reply["type"] == "error" and reply["error"] == "The graph changed since you opened it. Reload."
+            assert (await ask(two, action="GRAPH_SAVE", graph=later))["type"] == "error"  # no version at all
+        assert json.loads(path.read_text()) == GRAPH
+        assert audit.commands()[-1]["kind"] == "command_rejected"
+    editing(tmp_path, go)
+
+
+def test_a_paused_robot_takes_no_goal_and_it_is_logged():
+    async def go(url, server, audit, sink, control):
+        server.robots[0].live.paused = True
+        async with connect(url) as ws:
+            await login(ws)
+            reply = await ask(ws, action="GOAL", robot="a", x=1, y=1)
+            assert reply["type"] == "error" and reply["error"] == "This robot is paused. Press Resume first."
+            assert (await ask(ws, action="GOAL", robot="a", point="dock"))["type"] == "error"
+            assert (await ask(ws, action="RESUME", robot="a"))["type"] == "ack"
+        assert sink.calls == [("resume",)]
+        rejected = rows(audit, "command_rejected")
+        assert len(rejected) == 2 and rejected[0]["reason"] == "This robot is paused. Press Resume first."
+    bridge(go)
+
+
+def test_anonymous_messages_stay_small_and_a_login_gets_room(tmp_path):
+    from websockets.exceptions import ConnectionClosed
+    padded = json.dumps({"action": "PING", "t": 1, "pad": "x" * (20 * 1024)})
+
+    async def closed_for_size(ws):
+        """Snapshots keep coming, so give up after a few seconds rather than hang."""
+        with pytest.raises(ConnectionClosed) as closed:
+            async with asyncio.timeout(4):
+                while True:
+                    await ws.recv()
+        assert closed.value.rcvd.code == 1009  # too big
+
+    async def until(ws, kind):
+        async with asyncio.timeout(4):
+            while (msg := json.loads(await ws.recv()))["type"] != kind:
+                pass
+        return msg
+
+    async def go(url, server, audit, control, path):
+        async with connect(url) as ws:
+            await ws.send(padded)
+            await closed_for_size(ws)
+        async with connect(url) as ws:
+            await login(ws)
+            await ws.send(padded)
+            await until(ws, "pong")
+            await ws.send(json.dumps({"action": "LOGOUT"}))
+            await until(ws, "auth")
+            await ws.send(padded)
+            await closed_for_size(ws)
     editing(tmp_path, go)
 
 
@@ -466,7 +534,7 @@ def test_a_big_graph_fits_in_one_message(tmp_path):
     async def go(url, server, audit, control, path):
         async with connect(url, max_size=None) as ws:
             await login(ws)
-            assert (await ask(ws, action="GRAPH_SAVE", graph=big))["type"] == "ack"
+            assert (await save(ws, server, big))["type"] == "ack"
     editing(tmp_path, go)
 
 

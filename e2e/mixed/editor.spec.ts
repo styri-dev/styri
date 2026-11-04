@@ -85,10 +85,15 @@ test("a saved graph takes orders at once: a vehicle drives a route it didn't hav
     const got: any[] = [];
     ws.onmessage = (e) => { const m = JSON.parse(e.data); if (["ack", "error"].includes(m.type)) got.push(m); };
     const wait = (n: number) => new Promise<void>((r) => { const t = setInterval(() => { if (got.length >= n) { clearInterval(t); r(); } }, 50); });
-    const auth = new Promise((r) => ws.addEventListener("message", (e) => { if (JSON.parse(e.data).type === "auth") r(0); }));
+    let version: string | null = null;
+    const auth = new Promise((r) => ws.addEventListener("message", (e) => {
+      const m = JSON.parse(e.data);
+      if (m.type === "hello") version = m.site.version;
+      if (m.type === "auth") r(0);
+    }));
     ws.send(JSON.stringify({ action: "LOGIN", password }));
     await auth;
-    ws.send(JSON.stringify({ action: "GRAPH_SAVE", graph: g }));
+    ws.send(JSON.stringify({ action: "GRAPH_SAVE", graph: g, version }));
     await wait(1);
     ws.send(JSON.stringify({ action: "GOAL", robot: "agv-07", node: "n3" }));
     await wait(2);
@@ -98,6 +103,23 @@ test("a saved graph takes orders at once: a vehicle drives a route it didn't hav
   expect(replies.map((r) => r.type)).toEqual(["ack", "ack"]);
   await page.goto("/#fleet");
   await expect(page.locator('button[data-robot="agv-07"]').getByTestId("task-state")).toHaveText("active", { timeout: 10_000 });
+});
+
+test("two editors: the second to save is told to reload, and keeps its draft", async ({ browser }) => {
+  const one = await (await browser.newContext()).newPage();
+  const two = await (await browser.newContext()).newPage();
+  for (const page of [one, two]) {
+    await login(page);
+    await page.getByTestId("edit-graph").click();
+    await page.getByTestId("tool-add").click();
+  }
+  await one.mouse.click(...(await spot(one, 0.2, 0.2)));
+  await one.getByTestId("save-graph").click();
+  await expect(one.getByTestId("edit-graph")).toBeVisible();
+  await two.mouse.click(...(await spot(two, 0.8, 0.8)));
+  await two.getByTestId("save-graph").click();
+  await expect(two.getByTestId("graph-error")).toHaveText("The graph changed since you opened it. Reload.");
+  await expect(two.getByTestId("save-graph")).toBeVisible();
 });
 
 test("at 390 px the toolbar fits and the map doesn't scroll while editing", async ({ page }) => {

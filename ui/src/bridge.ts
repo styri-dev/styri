@@ -90,6 +90,7 @@ export interface GraphNode {
 export interface Site {
   graph: { nodes: GraphNode[]; edges: { id: string; start: string; end: string }[] } | null;
   background: { url: string; scale: number; origin: [number, number] } | null;
+  version: string | null; // changes with the graph: a stale save is refused
   editable: boolean; // site.graph is set, so the editor has a file to save
   problems: string[];
 }

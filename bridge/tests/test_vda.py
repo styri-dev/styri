@@ -142,6 +142,51 @@ def test_order_follows_the_graph_and_validates():
     assert c.mqtt.sent[0][0] == "uagv/v2/acme/SN1/order"
 
 
+def position(x, y):
+    return {"x": x, "y": y, "theta": 0.0, "mapId": "m", "positionInitialized": True}
+
+
+def test_after_a_stop_partway_along_an_edge_the_order_starts_where_the_vehicle_is():
+    c, view = client()
+    # Last node a, but stopped most of the way to b.
+    feed(c, "state", state(agvPosition=position(3.8, 0.0)))
+    asyncio.run(c.goal(view, node_id="c"))
+    (order,) = sent(c, "order")
+    assert schema.problems("order", order) == []
+    assert [n["nodeId"] for n in order["nodes"]] == ["b", "c"]
+    assert order["nodes"][0]["nodePosition"]["allowedDeviationXY"] > 1.2  # takes in the 1.2 m to b
+    assert order["nodes"][1]["nodePosition"]["allowedDeviationXY"] == 0.5
+
+
+def test_stopped_mid_edge_on_a_long_edge_is_still_on_the_graph():
+    c, view = client()
+    long_graph = Graph.from_dict({"nodes": [{"id": "a", "x": 0, "y": 0, "map_id": "m"}, {"id": "b", "x": 10, "y": 0, "map_id": "m"}],
+                                  "edges": [{"id": "ab", "start": "a", "end": "b"}]})
+    c.graph = long_graph
+    feed(c, "state", state(agvPosition=position(4.0, 0.1)))  # 4 m from either node, but on the edge
+    asyncio.run(c.goal(view, node_id="b"))
+    assert [n["nodeId"] for n in sent(c, "order")[0]["nodes"]] == ["a", "b"]
+    assert long_graph.off_edges(5, 3) == 3
+
+
+def test_too_far_from_the_graph_to_join_it():
+    c, view = client()
+    feed(c, "state", state(agvPosition=position(20.0, 20.0)))
+    with pytest.raises(VdaError, match="from the nearest node"):
+        asyncio.run(c.goal(view, node_id="a"))
+    assert c.mqtt.sent == []
+
+
+def test_a_rejected_order_does_not_show_the_cancelled_one_as_done():
+    c, view = client()
+    feed(c, "state", state(orderId="o1", nodeStates=[{"nodeId": "b", "sequenceId": 2, "released": True}]))
+    asyncio.run(c.cancel(view))
+    feed(c, "state", state(orderId="o1"))
+    asyncio.run(c.goal(view, node_id="b"))
+    feed(c, "state", state(orderId="o1"))  # the vehicle turned the new order down
+    assert view.live.task_state == "idle"
+
+
 def test_a_click_snaps_to_the_nearest_node():
     c, view = client()
     feed(c, "state", state())

@@ -9,6 +9,7 @@ from ..sitemap import Edge, Node, from_site
 
 # Instant actions Styri sends, all non-blocking: they must never wait on the vehicle.
 BLOCKING = "NONE"
+DEVIATION = 0.5  # metres
 
 
 def timestamp() -> str:
@@ -25,16 +26,19 @@ def instant(*types: str) -> dict:
     return {"actions": [action(t) for t in types]}
 
 
-def order(order_id: str, nodes: list[Node], edges: list[Edge], offset=(0.0, 0.0, 0.0)) -> dict:
+def order(order_id: str, nodes: list[Node], edges: list[Edge], offset=(0.0, 0.0, 0.0),
+          start_deviation: float = 0.0) -> dict:
     """A route, all released: nodes take even sequence ids and edges odd ones.
 
-    The graph is in site coordinates; the vehicle gets them in its own frame.
+    The graph is in site coordinates; the vehicle gets them in its own frame. The
+    first node must take in where the vehicle stands, by `start_deviation` metres.
     """
-    def position(n: Node) -> dict:
+    def position(n: Node, deviation: float) -> dict:
         x, y, _ = from_site(n.x, n.y, 0.0, offset)
-        return {"x": x, "y": y, "mapId": n.map_id, "allowedDeviationXY": 0.5}
+        return {"x": x, "y": y, "mapId": n.map_id, "allowedDeviationXY": deviation}
 
-    body_nodes = [{"nodeId": n.id, "sequenceId": 2 * i, "released": True, "actions": [], "nodePosition": position(n)}
+    body_nodes = [{"nodeId": n.id, "sequenceId": 2 * i, "released": True, "actions": [],
+                   "nodePosition": position(n, max(DEVIATION, start_deviation) if i == 0 else DEVIATION)}
                   for i, n in enumerate(nodes)]
     body_edges = [{"edgeId": e.id, "sequenceId": 2 * i + 1, "released": True, "startNodeId": nodes[i].id,
                    "endNodeId": nodes[i + 1].id, "actions": []} for i, e in enumerate(edges)]

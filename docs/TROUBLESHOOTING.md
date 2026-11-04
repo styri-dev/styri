@@ -99,6 +99,10 @@ that isn't in `styri.yaml`.
   only a retained one.
 - **Order refused.** The first node of an order is where the vehicle is, so
   its `lastNodeId` or position must be on the graph, and its `mapId` must match.
+- **"This robot is paused. Press Resume first."** An Operator stop leaves a VDA
+  5050 vehicle paused. Styri never unpauses it by itself.
+- **"This robot is … from the nearest node".** It's off the graph, and more than 2 m
+  from a node. Move it nearer: Styri won't send it across floor the graph doesn't cover.
 - **"Held, cancel pending".** After an Operator stop, some vehicles keep the
   cancel open until they're unpaused. The vehicle is stopped. Press Resume to
   clear it, once it's safe for the vehicle to move.

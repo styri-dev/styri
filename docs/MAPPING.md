@@ -296,7 +296,9 @@ connect and delete nodes, then **Save graph**. It writes this same JSON, and the
 new graph applies at once, with no restart. Orders already running keep their route.
 `site.graph` can name a file that doesn't exist yet. To save, the file's folder must
 be writable by Styri (uid 10001), so don't mount it `:ro`. Saving replaces the file,
-so mount the folder, not the file.
+so mount the folder, not the file. The editor makes two-way edges: a one-way edge is
+set in the JSON, with `"directed": true`, and the editor keeps it when it saves. If
+someone else saved since you opened the editor, Save says so, and you reload.
 
 Tapping the map sends a
 ROS 2 robot to that point; a VDA 5050 robot goes to the nearest node, along the

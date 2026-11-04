@@ -42,7 +42,7 @@ docker compose up
 cd examples/mixed-fleet && docker compose up --build
 ```
 
-Open **http://localhost:8080** and log in with `styri-demo`.
+Open **http://localhost:8080** and log in with `styri-demo`. `docker compose down -v` resets the demo, map edits included.
 
 ## Control and safety
 
@@ -134,7 +134,7 @@ other common message types. Your robot's own message types load as an
 [overlay](docs/MAPPING.md#your-own-message-types). The full reference:
 [docs/MAPPING.md](docs/MAPPING.md).
 
-All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). Something not showing up? See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+All settings: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#configuration). What works with what: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Something not showing up? See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Roadmap
 

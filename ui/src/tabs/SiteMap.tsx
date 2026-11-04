@@ -51,6 +51,7 @@ export function SiteMap({ ctx, onLogin }: { ctx: PanelContext; onLogin: () => vo
   const [saving, setSaving] = useState(false);
   const dragging = useRef<string | null>(null);
   const frozen = useRef<View | null>(null); // the view holds still while nodes move
+  const openedAt = useRef<string | null>(null); // the version this draft started from
   const nodes = draft?.nodes ?? site?.graph?.nodes ?? [];
   const edges = draft?.edges ?? site?.graph?.edges ?? [];
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
@@ -76,6 +77,7 @@ export function SiteMap({ ctx, onLogin }: { ctx: PanelContext; onLogin: () => vo
 
   const startEdit = () => {
     frozen.current = v;
+    openedAt.current = site?.version ?? null;
     setDraft({ nodes, edges });
     setTool("move");
     setTarget(null);
@@ -88,7 +90,7 @@ export function SiteMap({ ctx, onLogin }: { ctx: PanelContext; onLogin: () => vo
   };
   const save = () => {
     setSaving(true);
-    ctx.send({ action: "GRAPH_SAVE", graph: draft });
+    ctx.send({ action: "GRAPH_SAVE", graph: draft, version: openedAt.current });
   };
   // Saved: the bridge sends the new site to everyone. Refused: a notice, and the draft stays.
   const saved = ctx.state.hello?.site;
@@ -142,7 +144,8 @@ export function SiteMap({ ctx, onLogin }: { ctx: PanelContext; onLogin: () => vo
   };
 
   const bg = site?.background;
-  const refusal = draft && ctx.state.notice && !ctx.state.notice.robot ? ctx.state.notice.text : null;
+  const notice = ctx.state.notice;
+  const refusal = notice && (draft ? !notice.robot : notice.robot === robot?.id) ? notice.text : null;
   return (
     <div className="page mapview">
       {(site?.problems ?? []).map((p) => <p key={p} className="warn-fg small" role="alert">{p}</p>)}

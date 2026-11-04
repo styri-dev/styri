@@ -38,7 +38,8 @@ logger = logging.getLogger("styri_bridge")
 SNAPSHOT_PERIOD = 1.0  # seconds
 MAX_PREVIEW = 8000  # characters of a message shown on the Topics tab
 READ_ONLY = "Control is off: this panel is view-only and sends nothing to the robot."
-MAX_MESSAGE = 256 * 1024  # bytes from a browser: room for a site's node graph
+MAX_MESSAGE = 16 * 1024  # bytes from a browser
+MAX_MESSAGE_LOGGED_IN = 256 * 1024  # room for a site's node graph, after a login
 CORE_ROBOTS = 3  # how many robots Core shows; a license may raise it
 PRICING = "https://styri.dev/pricing"
 

@@ -9,6 +9,7 @@ Edges run both ways unless `"directed": true`. No ROS imports.
 
 from __future__ import annotations
 
+import hashlib
 import heapq
 import json
 import math
@@ -86,6 +87,17 @@ class Graph:
         """The closest node, on one map if given."""
         pool = [n for n in self.nodes.values() if map_id is None or n.map_id == map_id]
         return min(pool, key=lambda n: math.hypot(n.x - x, n.y - y), default=None)
+
+    def off_edges(self, x: float, y: float) -> float:
+        """How far a point is from the nearest edge, in metres; infinity with no edges."""
+        best = math.inf
+        for e in self.edges:
+            a, b = self.nodes[e.start], self.nodes[e.end]
+            dx, dy = b.x - a.x, b.y - a.y
+            span = dx * dx + dy * dy
+            t = max(0.0, min(1.0, ((x - a.x) * dx + (y - a.y) * dy) / span)) if span else 0.0
+            best = min(best, math.hypot(x - a.x - t * dx, y - a.y - t * dy))
+        return best
 
     def route(self, start: str, goal: str) -> tuple[list[Node], list[Edge]] | None:
         """Shortest path as (nodes, edges), or None if there's no way there."""
@@ -210,9 +222,16 @@ class Site:
             return pgm_to_png(raw), "image/png"
         return raw, "image/jpeg" if self.background.path.lower().endswith((".jpg", ".jpeg")) else "image/png"
 
+    @property
+    def version(self) -> str | None:
+        """Changes with the graph's content: how the editor knows someone else saved first."""
+        if self.graph is None:
+            return None
+        return hashlib.sha256(json.dumps(self.graph.to_dict(), sort_keys=True).encode()).hexdigest()[:16]
+
     def describe(self) -> dict:
         b = self.background
-        return {"graph": self.graph.to_dict() if self.graph else None,
+        return {"graph": self.graph.to_dict() if self.graph else None, "version": self.version,
                 "background": {"url": "/site/map", "scale": b.scale, "origin": list(b.origin)} if b else None,
                 "editable": bool(self.graph_path), "problems": self.problems}
 

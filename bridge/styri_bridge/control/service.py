@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from ..model import RobotView, capabilities, is_stale
-from ..server import BridgeServer, Session, peer_ip
+from ..server import MAX_MESSAGE, MAX_MESSAGE_LOGGED_IN, BridgeServer, Session, peer_ip
 from ..sitemap import Graph, GraphError
 from . import commands
 from .auth import ADMIN, ANONYMOUS, Admin, token_from
@@ -32,6 +32,8 @@ from .teleop import Teleop
 
 logger = logging.getLogger("styri_bridge")
 
+PAUSED = "This robot is paused. Press Resume first."
+GRAPH_CHANGED = "The graph changed since you opened it. Reload."
 STALE = "This robot's data is stale: teleop and waypoints are off. Operator stop stays available."
 OTHER_DRIVER = "Being driven by another session"
 AUDIT_ROWS = 200
@@ -56,6 +58,7 @@ class Control:
         self.stop_requires_login = settings.stop_requires_login
         self.clock = time.monotonic
         self._anonymous_stops: dict[int, float] = {}  # robot index -> last stop without a login
+        self._saving = asyncio.Lock()
 
     def attach(self) -> "Control":
         b = self.bridge
@@ -95,10 +98,15 @@ class Control:
     def _hello(self, session: Session) -> dict:
         request = session.ws.request
         token = token_from(request.headers.get("Cookie")) if request else None
-        logged_in = self.admin.valid(token)
-        if logged_in:
-            session.data["token"] = token
+        if self.admin.valid(token):
+            self._logged_in_now(session, token)
         return {"control": self._status(session)}
+
+    @staticmethod
+    def _logged_in_now(session: Session, token: str) -> None:
+        session.data["token"] = token
+        # Anonymous connections stay at the small limit: only a login may send a node graph.
+        session.ws.protocol.max_message_size = MAX_MESSAGE_LOGGED_IN
 
     def _status(self, session: Session) -> dict:
         return {"enabled": True, "logged_in": self._logged_in(session), "needs_setup": self.admin.needs_setup,
@@ -139,7 +147,7 @@ class Control:
 
     def _open(self, session: Session) -> dict:
         token, ticket = self.admin.open_session()
-        session.data["token"] = token
+        self._logged_in_now(session, token)
         self.audit.record("login", client=session.client, user=ADMIN)
         return {"type": "auth", "ticket": ticket, "control": self._status(session)}
 
@@ -157,6 +165,7 @@ class Control:
     async def _logout(self, session: Session, data: dict) -> dict:
         self.teleop.disconnected(session)
         self.admin.close_session(session.data.pop("token", None))
+        session.ws.protocol.max_message_size = MAX_MESSAGE
         self.audit.record("logout", client=session.client, user=ADMIN)
         return {"type": "auth", "control": self._status(session)}
 
@@ -211,11 +220,14 @@ class Control:
                 raise GraphError(f"at most {commands.MAX_NODES} nodes")
         except GraphError as exc:
             return self._reject(session, "GRAPH_SAVE", f"Graph not saved: {exc}.")
-        try:
-            await asyncio.to_thread(site.save, graph)
-        except OSError as exc:
-            return self._reject(session, "GRAPH_SAVE", f"Can't write {site.graph_path}: {exc.strerror or exc}. "
-                                                       "Its folder must be writable by Styri (uid 10001), not mounted :ro.")
+        async with self._saving:  # two saves can't both pass the check
+            if data.get("version") != site.version:
+                return self._reject(session, "GRAPH_SAVE", GRAPH_CHANGED)
+            try:
+                await asyncio.to_thread(site.save, graph)
+            except OSError as exc:
+                return self._reject(session, "GRAPH_SAVE", f"Can't write {site.graph_path}: {exc.strerror or exc}. "
+                                                           "Its folder must be writable by Styri (uid 10001), not mounted :ro.")
         if self.vda is not None:
             self.vda.graph = graph
         self.audit.record("command", client=session.client, user=ADMIN, action="GRAPH_SAVE",
@@ -247,6 +259,8 @@ class Control:
             raise Refused(f"{action} isn't allowed for this robot: see its entry in styri.yaml")
         if action in ("TELEOP", "GOAL") and self._stale(view):
             raise Refused(STALE)
+        if action == "GOAL" and view.live.paused:
+            raise Refused(PAUSED)
 
     async def _robot_command(self, session: Session, action: str, data: dict) -> dict | None:
         payload = {k: v for k, v in data.items() if k not in ("action", "robot", "id")}

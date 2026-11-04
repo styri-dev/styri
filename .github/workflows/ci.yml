@@ -100,16 +100,16 @@ jobs:
       - name: View-only sends nothing over MQTT
         run: |
           docker compose -f compose.yaml -f ../../e2e/mixed-fleet/view-only.yaml -f no-internet.yaml up -d
-          docker compose exec -T styri /ros_entrypoint.sh python3 - < ../../e2e/mixed-fleet/view_only.py
-          docker compose down -t 2
+          ../../e2e/mixed-fleet/run.sh view_only.py ../../e2e/mixed-fleet/view-only.yaml no-internet.yaml
+          docker compose down -t 2 -v
       - name: Acceptance, with no internet route
         run: |
           docker compose -f compose.yaml -f no-internet.yaml up -d
-          docker compose exec -T -e EXPECT_NO_INTERNET=1 styri /ros_entrypoint.sh python3 - < ../../e2e/mixed-fleet/accept.py
+          SUITE_ENV=EXPECT_NO_INTERNET=1 ../../e2e/mixed-fleet/run.sh accept.py no-internet.yaml
       - name: Watchdog and deadman, timed on the real /cmd_vel, 20 runs each
         run: |
-          docker compose exec -T styri /ros_entrypoint.sh python3 - < ../../e2e/mixed-fleet/watchdog.py
-          docker compose down -t 2
+          ../../e2e/mixed-fleet/run.sh watchdog.py no-internet.yaml
+          docker compose down -t 2 -v
       - name: Panel control
         run: |
           docker compose up -d
@@ -126,7 +126,7 @@ jobs:
           npx playwright test --config mixed.config.ts
       - name: Map editor
         run: |
-          docker compose down -t 2
+          docker compose down -t 2 -v
           docker compose -f compose.yaml -f ../../e2e/mixed-fleet/editor.yaml up -d
           curl -fsS --retry 30 --retry-all-errors --retry-delay 1 http://localhost:8080/healthz
       - working-directory: e2e

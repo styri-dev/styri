@@ -37,6 +37,9 @@ async function main() {
         lastNodeId: env("START_NODE", ""),
       },
       vehicleSpeed: Number(env("SPEED", 1)),
+      // vda-5050-lib reads allowedDeviationXy; the standard's field, which Styri sends, is
+      // allowedDeviationXY. So it falls back to this: wide enough for the demo's longest edge.
+      agvNormalDeviationXyTolerance: 7,
     },
   );
   await controller.start();

@@ -1,6 +1,11 @@
 import { expect, type Page, test } from "@playwright/test";
 
+import { clean } from "./clean";
+
 const PASSWORD = process.env.STYRI_ADMIN_PASSWORD ?? "styri-demo";
+
+test.beforeEach(clean);
+test.setTimeout(90_000);
 
 async function login(page: Page) {
   await page.getByTestId("login-toggle").click();
@@ -68,8 +73,36 @@ test("one tap on the map, one Send: a VDA vehicle snaps to a node", async ({ pag
   await expect(page.getByTestId("notice")).toHaveCount(0);
 });
 
+test("a paused robot refuses a new goal, and says why", async ({ page }) => {
+  await page.goto("/#map");
+  await login(page);
+  await page.locator('g[data-robot="agv-08"]').click();
+  await page.getByTestId("operator-stop").click();
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toBeVisible({ timeout: 10_000 });
+  const box = (await page.getByTestId("site-map").boundingBox())!;
+  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.3);
+  await page.getByTestId("send-goal").click();
+  await expect(page.getByTestId("graph-error")).toHaveText("This robot is paused. Press Resume first.");
+});
+
+test("the demo's map editor saves out of the box", async ({ page }) => {
+  await page.goto("/#map");
+  await login(page);
+  await expect(page.locator("[data-node]").first()).toBeVisible();
+  const before = await page.locator("[data-node]").count();
+  await page.getByTestId("edit-graph").click();
+  await page.getByTestId("tool-add").click();
+  const box = (await page.getByTestId("site-map").boundingBox())!;
+  // A clear spot each time: a tap on an existing node doesn't add one.
+  await page.mouse.click(box.x + box.width * (0.08 + 0.09 * (before % 10)), box.y + box.height * 0.97);
+  await page.getByTestId("save-graph").click();
+  await expect(page.getByTestId("edit-graph")).toBeVisible();
+  await expect(page.getByTestId("graph-error")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator("[data-node]")).toHaveCount(before + 1);
+});
+
 test("Stop all: a tap does nothing, a one-second hold stops the fleet", async ({ page }) => {
-  await page.waitForTimeout(2100); // past the anonymous limit from the test above
   await page.goto("/#activity");
   const stops = page.getByText(/Operator stop from/);
   await expect(page.locator(".tab--active")).toContainText("Activity");

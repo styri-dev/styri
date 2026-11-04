@@ -16,7 +16,10 @@ from websockets.asyncio.client import connect
 
 PASSWORD = os.environ.get("STYRI_ADMIN_PASSWORD", "styri-demo")
 NO_INTERNET = os.environ.get("EXPECT_NO_INTERNET") == "1"
-GOALS = json.loads(os.environ.get("GOALS") or '{"amr-01": {"x": 6, "y": 4}, "agv-07": {"node": "n3"}, "agv-08": {"node": "n6"}}')
+# Where each robot may be sent. Each goes to the first that's away from where it is, so
+# this passes wherever an earlier suite left it.
+GOALS = json.loads(os.environ.get("GOALS") or """{"amr-01": [{"x": 6, "y": 4}, {"x": 1, "y": 1}],
+    "agv-07": [{"node": "n3"}, {"node": "n1"}], "agv-08": [{"node": "n6"}, {"node": "n1"}]}""")
 fleet: dict = {}
 
 
@@ -90,8 +93,14 @@ async def main():
         step("OK   logged in")
 
         start = {n: dict(fleet[n]["pose"]) for n in names}
-        for name, goal in GOALS.items():
-            await ask(action="GOAL", robot=name, **goal)
+        def away(name, goal):
+            robot = fleet[name]
+            if "node" in goal:
+                return robot["task"]["last_node"] != goal["node"]
+            return abs(robot["pose"]["x"] - goal["x"]) + abs(robot["pose"]["y"] - goal["y"]) > 1
+
+        for name, goals in GOALS.items():
+            await ask(action="GOAL", robot=name, **next(g for g in goals if away(name, g)))
         await until("every robot took its goal and is moving", lambda: all(
             fleet[n]["task"]["state"] == "active" and fleet[n]["pose"] != start[n] for n in names))
 

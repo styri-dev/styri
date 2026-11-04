@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import ssl
 import time
@@ -32,6 +33,8 @@ REPORT_AFTER = 5       # failed tries before saying so, when it was never connec
 STOP_RETRY = 1.0       # seconds between Operator stop retries, until the vehicle stands still
 STOP_GIVE_UP = 15.0    # seconds, then the panel says it isn't confirmed
 FACTSHEET_RETRY = 10.0  # seconds
+MAX_JOIN = 2.0  # metres: further than this from a node, and not on an edge, an order won't start
+ON_EDGE = 0.5  # metres
 DEFAULT_VERSION = "2.1.0"
 NOT_A_FAULT = {"noOrderToCancel"}  # what a vehicle reports when Operator stop finds no order
 
@@ -307,18 +310,26 @@ class VdaClient:
             raise VdaError(f"no node {node_id} in the graph" if node_id else "the graph has no nodes")
         offset = view.map.link.map_offset
         pose = to_site(view.live.pose, offset)
-        start = self.graph.nodes.get(view.live.last_node or "")
+        # After a stop a vehicle may stand partway along an edge, so its last node can be
+        # behind it. An order has to start where it is: at the nearest node, with that
+        # node's deviation wide enough to take it in.
+        start = self.graph.nearest(pose["x"], pose["y"], pose.get("map_id")) if pose else None
         if start is None and pose is not None:
-            start = self.graph.nearest(pose["x"], pose["y"], pose.get("map_id"))
+            start = self.graph.nearest(pose["x"], pose["y"])
+        if start is None:
+            start = self.graph.nodes.get(view.live.last_node or "")
         if start is None:
             raise VdaError("this robot's position isn't known yet")
+        off_by = math.hypot(pose["x"] - start.x, pose["y"] - start.y) if pose else 0.0
+        # Stopped on an edge is on the graph, however long the edge. Off it, only near a node.
+        if off_by > MAX_JOIN and pose and self.graph.off_edges(pose["x"], pose["y"]) > ON_EDGE:
+            raise VdaError(f"this robot is {off_by:.1f} m from the nearest node, {start.id}: move it nearer the graph")
         route = self.graph.route(start.id, goal.id)
         if route is None:
             raise VdaError(f"no route from {start.id} to {goal.id}")
         v.orders_sent += 1
         order_id = f"styri-{int(time.time())}-{v.orders_sent}"
-        v.cancelled = None
-        return await self.send(v, "order", orders.order(order_id, *route, offset))
+        return await self.send(v, "order", orders.order(order_id, *route, offset, start_deviation=off_by * 1.1 + 0.1))
 
     async def operator_stop(self, view: RobotView) -> dict:
         """startPause then cancelOrder in one message, repeated until the vehicle stands still.
