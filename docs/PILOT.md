@@ -1,14 +1,12 @@
 # Styri Pilot
 
-Styri Pilot shows up to five robots on one panel: a **Fleet** tab with one
-tile per robot, each robot's own Overview, Topics and Configuration, and a
-robot switcher in the header. Like Styri Core it only reads from the robots
-and never sends anything to them.
+Styri Core covers up to three robots. Styri Pilot covers up to 20 on one site. The
+panel, the fleet view, control and VDA 5050 are the same in both.
 
 Pilot runs from the **Styri Pro** image, `ghcr.io/styri-dev/styri-pro`
 (public, amd64 and arm64). **Without a license file the Pro image is Styri
-Core:** one robot, read-only, nothing else. A Styri Pilot license, which you
-receive by email after you buy, unlocks the fleet.
+Core:** up to three robots. A Styri Pilot license, which you receive by email
+after you buy, raises that.
 
 ## Install
 
