@@ -3,16 +3,22 @@ import type { PanelContext } from "../App";
 import { PROTOCOL } from "../tabs/Fleet";
 import { ControlDrawer } from "./ControlDrawer";
 
+const AUDIT_EVERY_MS = 2000;
+
 /** Under the Overview: task, vehicle details, this robot's commands, and the drawer. */
 export function RobotDetail({ ctx, onLogin }: { ctx: PanelContext; onLogin: () => void }) {
   const robot = ctx.state.fleet.find((r) => r.index === ctx.robot);
   const loggedIn = !!ctx.state.control?.logged_in;
   const id = robot?.id;
   const { send } = ctx;
-  const count = ctx.state.events.length;
+  // Not every command makes an Activity event (a drive doesn't), so ask on a timer.
   useEffect(() => {
-    if (loggedIn && id) send({ action: "AUDIT", robot: id });
-  }, [loggedIn, id, send, count]);
+    if (!loggedIn || !id) return;
+    const ask = () => send({ action: "AUDIT", robot: id });
+    ask();
+    const t = setInterval(ask, AUDIT_EVERY_MS);
+    return () => clearInterval(t);
+  }, [loggedIn, id, send]);
   if (!robot) return null;
   const sheet = robot.factsheet;
   const type = sheet?.typeSpecification;
