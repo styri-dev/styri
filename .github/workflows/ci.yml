@@ -106,6 +106,9 @@ jobs:
         run: |
           docker compose -f compose.yaml -f no-internet.yaml up -d
           docker compose exec -T -e EXPECT_NO_INTERNET=1 styri /ros_entrypoint.sh python3 - < ../../e2e/mixed-fleet/accept.py
+      - name: Watchdog and deadman, timed on the real /cmd_vel, 20 runs each
+        run: |
+          docker compose exec -T styri /ros_entrypoint.sh python3 - < ../../e2e/mixed-fleet/watchdog.py
           docker compose down -t 2
       - name: Panel control
         run: |
