@@ -17,14 +17,14 @@ SCHEMA_DIR = "bridge/styri_bridge/vda/schemas/"
 SCHEMA_FIELD = '"eStop"'  # exactly the schema's key, quoted
 # "e stop" also matches inside ordinary words and code.
 WORD = re.compile(r"(?<![a-z])(" + BANNED.pattern + r")(?![a-z])", re.IGNORECASE)
-SKIP = (".png", ".gif", ".woff2", ".lock", ".ico", ".jpg")
+SKIP = (".png", ".gif", ".woff2", ".lock", ".ico", ".jpg", ".rtf")
 
 
-def problems(root: Path) -> list[str]:
+def problems(root: Path, skip: tuple[str, ...] = ()) -> list[str]:
     tracked = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True).stdout.split("\n")
     out = []
     for name in filter(None, tracked):
-        if name.startswith(SCHEMA_DIR) or name.endswith(SKIP) or name == "ci/check_wording.py":
+        if name.startswith((SCHEMA_DIR, *skip)) or name.endswith(SKIP) or name == "ci/check_wording.py":
             continue
         path = root / name
         if not path.is_file():
@@ -41,7 +41,8 @@ def problems(root: Path) -> list[str]:
 
 
 def main() -> int:
-    found = problems(Path(sys.argv[1] if len(sys.argv) > 1 else "."))
+    # check_wording.py [root] [path prefix to leave out ...]
+    found = problems(Path(sys.argv[1] if len(sys.argv) > 1 else "."), tuple(sys.argv[2:]))
     for line in found:
         print(line)
     if found:
