@@ -155,3 +155,30 @@ def test_ros_pose_reads_amcl_shape():
     q = NS(x=0, y=0, z=0.7071068, w=0.7071068)
     model.ros_pose(live, NS(header=NS(frame_id="map"), pose=NS(pose=NS(position=NS(x=1, y=2), orientation=q))))
     assert live.pose["x"] == 1 and abs(live.pose["theta"] - 1.5708) < 1e-3 and live.pose["map_id"] == "map"
+
+
+def transform(parent, child, x=0.0, y=0.0, yaw_=0.0):
+    import math
+    return NS(header=NS(frame_id=parent), child_frame_id=child,
+              transform=NS(translation=NS(x=x, y=y), rotation=NS(x=0, y=0, z=math.sin(yaw_ / 2), w=math.cos(yaw_ / 2))))
+
+
+def test_tf_pose_walks_map_to_base():
+    import math
+    live = model.Live()
+    tf = model.TfPose(live)
+    tf.message(NS(transforms=[transform("odom", "base_footprint", 1.0, 0.0)]))
+    assert live.pose is None  # no way to the map yet
+    tf.message(NS(transforms=[transform("map", "odom", 2.0, 3.0, math.pi / 2)]))
+    assert abs(live.pose["x"] - 2.0) < 1e-6 and abs(live.pose["y"] - 4.0) < 1e-6
+    assert abs(live.pose["theta"] - math.pi / 2) < 1e-6
+    tf.message(NS(transforms=[transform("base_footprint", "base_link")]))
+    assert abs(live.pose["y"] - 4.0) < 1e-6
+
+
+def test_pose_tf_in_the_file_taps_both_topics():
+    robots, _ = mapping.from_dict({"robots": [{"name": "a", "namespace": "/a", "pose": "tf"}]}, {})
+    assert robots[0].link.pose_tf and robots[0].link.pose == "/a/tf"
+    cfg = Config(audit_db=":memory:", ui_dir=None, mapping=mapping.Loaded(tuple(robots), "test"))
+    server = BridgeServer(cfg, AuditLog(":memory:"))
+    assert {"/a/tf", "/a/tf_static"} <= set(server.robots[0].monitor.taps)

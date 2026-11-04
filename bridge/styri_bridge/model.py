@@ -115,6 +115,38 @@ def ros_pose(live: Live, msg: Any) -> None:
                  "map_id": getattr(msg.header, "frame_id", "") or "map"}
 
 
+class TfPose:
+    """The robot's pose from tf: map down through its frames to the base, for robots with no pose topic."""
+    BASES = ("base_link", "base_footprint")
+
+    def __init__(self, live: Live):
+        self.live = live
+        self.parents: dict[str, tuple[str, Any]] = {}  # child frame -> parent frame, transform
+
+    def message(self, msg: Any) -> None:
+        """tf2_msgs/TFMessage, from /tf or /tf_static."""
+        for t in msg.transforms:
+            self.parents[t.child_frame_id.lstrip("/")] = (t.header.frame_id.lstrip("/"), t.transform)
+        for base in self.BASES:
+            pose = self._in_map(base)
+            if pose is not None:
+                self.live.pose = {"x": pose[0], "y": pose[1], "theta": pose[2], "map_id": "map"}
+                return
+
+    def _in_map(self, frame: str) -> tuple[float, float, float] | None:
+        x = y = theta = 0.0
+        for _ in range(16):  # a chain this long isn't a robot's
+            if frame == "map":
+                return x, y, theta
+            if frame not in self.parents:
+                return None
+            frame, t = self.parents[frame]
+            a = yaw(t.rotation)
+            x, y = t.translation.x + math.cos(a) * x - math.sin(a) * y, t.translation.y + math.sin(a) * x + math.cos(a) * y
+            theta += a
+        return None
+
+
 def ros_odom(live: Live, msg: Any) -> None:
     linear, angular = msg.twist.twist.linear.x, msg.twist.twist.angular.z
     live.velocity = {"linear": linear, "angular": angular}

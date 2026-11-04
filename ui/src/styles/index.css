@@ -382,12 +382,13 @@ button { font: inherit; }
 .sitemap { display: block; width: 100%; max-height: 62vh; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-3); }
 .sitemap__edge { stroke: var(--text-3); }
 .sitemap__node { fill: var(--surface-3); stroke: var(--text-3); stroke-width: 0.05; }
-.sitemap__label { fill: var(--text-3); }
+.sitemap__label { fill: var(--text-2); paint-order: stroke; stroke: var(--surface-1); stroke-width: 0.06; }
+[data-theme="dark"] .sitemap image { filter: invert(0.92) hue-rotate(180deg); }
 .sitemap__route { fill: none; stroke: var(--accent); stroke-dasharray: 0.3 0.2; }
 .sitemap__target { fill: none; stroke: var(--accent); }
 .marker { cursor: pointer; }
 .marker circle, .marker rect { fill: var(--surface-3); stroke: var(--text-1); }
-.marker text { fill: var(--text-1); font-weight: 700; }
+.marker text { fill: var(--text-1); font-weight: 700; paint-order: stroke; stroke: var(--surface-1); stroke-width: 0.08; }
 .marker__heading { stroke: var(--text-1); }
 .marker--ok circle, .marker--ok rect { fill: var(--ok-500); }
 .marker--warn circle, .marker--warn rect { fill: var(--caution-500); }

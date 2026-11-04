@@ -247,7 +247,7 @@ robots:
     cmd_vel: /amr01/cmd_vel          # what control may publish to
     nav2_action: /amr01/navigate_to_pose
     pause_topic: /amr01/pause        # optional std_msgs/Bool; without it, no Pause button
-    pose: /amr01/amcl_pose
+    pose: /amr01/amcl_pose           # or `tf`: map to base_link from /tf
     odom: /amr01/odom                # optional: speed readout
     max_linear: 0.5                  # m/s, enforced in the bridge
     max_angular: 1.0                 # rad/s

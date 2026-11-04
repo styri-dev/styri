@@ -431,11 +431,17 @@ class Monitor:
         for t in sorted(self.topics.values(), key=lambda t: t.name):
             age = None if t.last is None else now - t.last
             stale = t.active() and age is not None and age > self.robot.stale_after
+            # Only topics the panel relies on go in the log: plenty of others, like
+            # Nav2's /plan, publish only while there's a goal, and quiet is normal.
+            mapped = t.name == self.robot.diagnostics_topic or \
+                any(v.stale_after is not None for v in self._by_topic.get(t.name, ()))
             if stale and t.stale_since is None:
                 t.stale_since = t.last
-                self.activity.add("warning", f"{t.name} stopped publishing", t.name)
+                if mapped:
+                    self.activity.add("warning", f"{t.name} stopped publishing", t.name)
             elif not stale and t.stale_since is not None:
-                self.activity.add("state", f"{t.name} recovered after {now - t.stale_since:.0f} s", t.name)
+                if mapped:
+                    self.activity.add("state", f"{t.name} recovered after {now - t.stale_since:.0f} s", t.name)
                 t.stale_since = None
             rows.append({"name": t.name, "type": t.type, "hz": round(t.rate(now), 1),
                          "age": None if age is None else round(age, 2), "stale": stale,

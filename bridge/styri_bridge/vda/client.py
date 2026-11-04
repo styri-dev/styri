@@ -28,6 +28,7 @@ logger = logging.getLogger("styri_bridge")
 SUBSCRIBE = ("connection", "state", "visualization", "factsheet")
 TOPIC_TYPES = {t: f"vda5050/{t}" for t in SUBSCRIBE}
 RECONNECT_AFTER = 2.0  # seconds
+REPORT_AFTER = 5       # failed tries before saying so, when it was never connected
 STOP_RETRY = 1.0       # seconds between Operator stop retries, until the vehicle stands still
 STOP_GIVE_UP = 15.0    # seconds, then the panel says it isn't confirmed
 FACTSHEET_RETRY = 10.0  # seconds
@@ -88,12 +89,12 @@ class VdaClient:
         return args
 
     async def run(self) -> None:
-        """Stay connected. A broker that's down is reported once, and retried."""
-        reported = False
+        """Stay connected. A broker that goes away, or never comes, is reported once, and retried."""
+        failures = 0
         while True:
             try:
                 async with aiomqtt.Client(identifier=f"styri-{os.getpid()}", **self._client_args()) as client:
-                    self.mqtt, self.connected, reported = client, True, False
+                    self.mqtt, self.connected, failures = client, True, 0
                     self.seen_broker = True
                     self.activity.add("connection", "Connected to the MQTT broker", "vda")
                     await client.subscribe(f"{self.settings.interface}/+/+/+/+")
@@ -102,10 +103,13 @@ class VdaClient:
                         await self._request_factsheets()
             except aiomqtt.MqttError as exc:
                 self.mqtt = None
-                if self.connected or not reported:
+                failures += 1
+                if self.connected:
                     logger.warning("MQTT broker: %s", exc)
                     self.activity.add("warning", "Lost the MQTT broker: VDA 5050 robots are stale until it's back", "vda")
-                    reported = True
+                elif failures == REPORT_AFTER:  # the bundled broker takes a moment at start
+                    logger.warning("MQTT broker: %s", exc)
+                    self.activity.add("warning", "Can't reach the MQTT broker: VDA 5050 robots are stale until it's up", "vda")
                 self.connected = False
                 for v in self.vehicles.values():
                     v.view.live.online = False

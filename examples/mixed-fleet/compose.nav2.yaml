@@ -1,0 +1,45 @@
+# The same fleet with a real Nav2 stack in place of the simple ROS 2 sim.
+#
+#   docker compose -f compose.yaml -f compose.nav2.yaml up --build
+#
+# Nav2's planner, controller and behavior tree run for real, on a TurtleBot 3 in
+# Nav2's sandbox map. Only Gazebo's physics is swapped, for Nav2's own loopback
+# simulator, so this runs on a laptop.
+services:
+  styri:
+    depends_on:
+      amr-01: {condition: service_healthy}
+    environment:
+      STYRI_CONFIG: /etc/styri/styri-nav2.yaml
+    volumes:
+      - ./styri-nav2.yaml:/etc/styri/styri-nav2.yaml:ro
+      - site-map:/etc/styri/site-map:ro
+
+  amr-01:
+    build: ./nav2
+    image: styri-nav2:jazzy
+    environment:
+      ROS_DOMAIN_ID: "42"
+    volumes:
+      - site-map:/site-map
+    healthcheck:  # Styri reads the map once, at start
+      test: ["CMD", "test", "-f", "/site-map/tb3_sandbox.yaml"]
+      interval: 2s
+      retries: 30
+
+  agv-07:
+    environment:
+      START_NODE: n1
+      START_X: "-1.8"
+      START_Y: "1.8"
+      SPEED: "0.2"
+
+  agv-08:
+    environment:
+      START_NODE: n4
+      START_X: "1.8"
+      START_Y: "-1.8"
+      SPEED: "0.2"
+
+volumes:
+  site-map:

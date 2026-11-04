@@ -1,0 +1,72 @@
+{
+ "nodes": [
+  {
+   "id": "n1",
+   "x": -1.8,
+   "y": 1.8,
+   "map_id": "plant-a"
+  },
+  {
+   "id": "n2",
+   "x": 0,
+   "y": 1.8,
+   "map_id": "plant-a"
+  },
+  {
+   "id": "n3",
+   "x": 1.8,
+   "y": 1.8,
+   "map_id": "plant-a"
+  },
+  {
+   "id": "n4",
+   "x": 1.8,
+   "y": -1.8,
+   "map_id": "plant-a"
+  },
+  {
+   "id": "n5",
+   "x": 0,
+   "y": -1.8,
+   "map_id": "plant-a"
+  },
+  {
+   "id": "n6",
+   "x": -1.8,
+   "y": -1.8,
+   "map_id": "plant-a"
+  }
+ ],
+ "edges": [
+  {
+   "id": "e12",
+   "start": "n1",
+   "end": "n2"
+  },
+  {
+   "id": "e23",
+   "start": "n2",
+   "end": "n3"
+  },
+  {
+   "id": "e34",
+   "start": "n3",
+   "end": "n4"
+  },
+  {
+   "id": "e45",
+   "start": "n4",
+   "end": "n5"
+  },
+  {
+   "id": "e56",
+   "start": "n5",
+   "end": "n6"
+  },
+  {
+   "id": "e61",
+   "start": "n6",
+   "end": "n1"
+  }
+ ]
+}

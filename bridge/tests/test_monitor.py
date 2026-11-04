@@ -129,11 +129,12 @@ def test_stale_topic_and_no_data():
     snap = m.evaluate()
     assert snap["battery"]["stale"] and snap["health"]["level"] == "unknown"
     assert snap["health"]["line"].startswith("No data from the robot for ")
-    assert "/odom stopped publishing" in log.msgs()
+    assert "/battery_state stopped publishing" in log.msgs()
+    assert "/odom stopped publishing" not in log.msgs()  # not mapped: its quiet may be normal
     feed(m, clock, seconds=1)
     snap = m.evaluate()
     assert snap["health"]["level"] == "ok"
-    assert any(msg.startswith("/odom recovered after ") for msg in log.msgs())
+    assert any(msg.startswith("/battery_state recovered after ") for msg in log.msgs())
 
 
 def test_no_robot_topics():
@@ -211,3 +212,21 @@ def test_min_voltage_from_env(monkeypatch):
     assert Config.from_env().min_voltage is None
     monkeypatch.setenv("STYRI_MIN_VOLTAGE", "23.5")
     assert Config.from_env().min_voltage == 23.5
+
+
+def test_a_topic_mapped_as_never_stale_stays_out_of_the_log():
+    from styri_bridge.mapping import RobotMap, Value
+    log = Log()
+    robot = RobotMap("r", values=(Value("status", "Status", "/goal", "data", kind="text", stale_after=None),),
+                     diagnostics_topic=None)
+    clock = Clock()
+    m = Monitor(log, robot, clock=clock)
+    m.discovered([("/goal", "std_msgs/msg/String")], lambda _t: True)
+    for _ in range(5):
+        m.message("/goal", b"x")
+        m.mapped("/goal", {"data": "ok"})
+        clock.t += 0.1
+    m.evaluate()
+    clock.t += 60
+    m.evaluate()
+    assert not any("stopped publishing" in msg for msg in log.msgs())

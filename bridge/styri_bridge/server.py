@@ -205,7 +205,10 @@ class BridgeServer:
     def _tap(self, view: RobotView) -> None:
         """Have the robot's ROS topics feed its live model."""
         link, live, taps = view.map.link, view.live, view.monitor.taps
-        if link.pose:
+        if link.pose_tf:
+            tf = model.TfPose(live)
+            taps[link.pose] = taps[f"{link.pose}_static"] = tf.message
+        elif link.pose:
             taps[link.pose] = lambda msg: model.ros_pose(live, msg)
         if link.odom:
             taps[link.odom] = lambda msg: model.ros_odom(live, msg)

@@ -1,0 +1,54 @@
+# A real Nav2 robot and two VDA 5050 vehicles on Nav2's sandbox map, in one panel.
+site:
+  name: demo-plant
+  map: /etc/styri/site-map/tb3_sandbox.yaml
+  graph: /etc/styri/site/graph-nav2.json
+
+control:
+  enabled: true
+
+vda:
+  broker:
+    bind: 172.30.0.10   # this container's address on the demo network
+  interface: uagv
+
+robots:
+  - name: amr-01
+    protocol: ros2
+    vendor: TurtleBot
+    model: "3"
+    cmd_vel: /cmd_vel
+    nav2_action: /navigate_to_pose
+    pose: tf               # this simulator has no /amcl_pose
+    odom: /odom
+    max_linear: 0.26
+    max_angular: 1.0
+    battery: false         # nor a battery
+    cpu_temperature: false
+    status:
+      label: Navigation
+      topic: navigate_to_pose/_action/status
+      field: status_list[-1].status
+      labels: {1: ACCEPTED, 2: NAVIGATING, 3: CANCELING, 4: SUCCEEDED, 5: CANCELED, 6: FAILED}
+      when_empty: IDLE
+      warn: [FAILED]
+      stale_after: false
+    points:
+      - {name: Start, x: -2.0, y: -0.5}
+      - {name: Far corner, x: 1.5, y: 1.5}
+  - name: agv-07
+    protocol: vda5050
+    vendor: Acme
+    model: Carrier 100
+    manufacturer: acme
+    serial: "SN-0007"
+    username: agv07
+    password_env: AGV07_PASS
+  - name: agv-08
+    protocol: vda5050
+    vendor: Acme
+    model: Carrier 100
+    manufacturer: acme
+    serial: "SN-0008"
+    username: agv08
+    password_env: AGV08_PASS

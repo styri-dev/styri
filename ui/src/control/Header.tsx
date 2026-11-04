@@ -52,7 +52,8 @@ export function Login({ ctx, onClose }: { ctx: PanelContext; onClose: () => void
         <h2 className="modal__title">{setup ? "Set the admin password" : "Log in to control robots"}</h2>
         <p className="small text-2">
           {setup ? "This is the first login. Choose a password of at least 8 characters. It stays on this machine."
-            : "Viewing needs no login. Commands do, and each one is logged."}
+            : control?.stop_requires_login ? "Viewing needs no login. Commands do, and each one is logged."
+            : "Viewing and stopping need no login. Everything else does, and each command is logged."}
         </p>
         <input className="field-input" type="password" autoFocus autoComplete="current-password" aria-label="Password"
           value={password} onChange={(e) => setPassword(e.target.value)} />

@@ -135,6 +135,7 @@ class Link:
     nav2_action: str | None = None
     pause_topic: str | None = None  # std_msgs/Bool: true pauses, false resumes
     pose: str | None = None
+    pose_tf: bool = False  # `pose: tf`: map to base_link from /tf, not a pose topic
     odom: str | None = None
     max_linear: float = 0.5   # m/s
     max_angular: float = 1.0  # rad/s
@@ -504,7 +505,8 @@ def _link(data: dict, where: str, problems: list[str], namespace: str) -> Link:
         for k in vda_only:
             problems.append(f"{where}{k}: only for protocol: vda5050")
         return Link(**common, cmd_vel=topic("cmd_vel"), nav2_action=topic("nav2_action"),
-                    pause_topic=topic("pause_topic"), pose=topic("pose"), odom=topic("odom"))
+                    pause_topic=topic("pause_topic"), pose=topic("pose"), pose_tf=data.get("pose") == "tf",
+                    odom=topic("odom"))
     for k in ros_only:
         problems.append(f"{where}{k}: only for protocol: ros2")
     for k in ("manufacturer", "serial"):

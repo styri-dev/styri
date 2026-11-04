@@ -16,7 +16,7 @@ from websockets.asyncio.client import connect
 
 PASSWORD = os.environ.get("STYRI_ADMIN_PASSWORD", "styri-demo")
 NO_INTERNET = os.environ.get("EXPECT_NO_INTERNET") == "1"
-GOALS = {"amr-01": {"x": 6, "y": 4}, "agv-07": {"node": "n3"}, "agv-08": {"node": "n6"}}
+GOALS = json.loads(os.environ.get("GOALS") or '{"amr-01": {"x": 6, "y": 4}, "agv-07": {"node": "n3"}, "agv-08": {"node": "n6"}}')
 fleet: dict = {}
 
 
@@ -95,20 +95,22 @@ async def main():
         await until("every robot took its goal and is moving", lambda: all(
             fleet[n]["task"]["state"] == "active" and fleet[n]["pose"] != start[n] for n in names))
 
-        for name in names:
+        # Nav2 has no standard pause: a robot without a pause_topic has no Pause, and that's by design.
+        pausable = [n for n in names if fleet[n]["capabilities"]["can_pause"]]
+        for name in pausable:
             await ask(action="PAUSE", robot=name)
-        await until("every robot reports paused", lambda: all(fleet[n]["paused"] for n in names))
+        await until("every robot that can pause reports paused", lambda: all(fleet[n]["paused"] for n in pausable))
         await asyncio.sleep(1)
-        held = {n: dict(fleet[n]["pose"]) for n in names}
+        held = {n: dict(fleet[n]["pose"]) for n in pausable}
         await asyncio.sleep(2)
-        moved = [n for n in names if abs(fleet[n]["pose"]["x"] - held[n]["x"]) + abs(fleet[n]["pose"]["y"] - held[n]["y"]) > 0.02]
+        moved = [n for n in pausable if abs(fleet[n]["pose"]["x"] - held[n]["x"]) + abs(fleet[n]["pose"]["y"] - held[n]["y"]) > 0.02]
         if moved:
             sys.exit(f"FAIL still moving while paused: {moved}")
         step("OK   paused robots stood still")
 
-        for name in names:
+        for name in pausable:
             await ask(action="RESUME", robot=name)
-        await until("every robot moving again", lambda: all(not fleet[n]["paused"] for n in names))
+        await until("every robot moving again", lambda: all(not fleet[n]["paused"] for n in pausable))
 
         reply = await ask(action="OPERATOR_STOP_ALL")
         if reply["failed"]:

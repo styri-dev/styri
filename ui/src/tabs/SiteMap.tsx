@@ -17,7 +17,8 @@ function bounds(ctx: PanelContext, robots: RobotModel[], size?: [number, number]
   const site = ctx.state.hello?.site;
   const pts: [number, number][] = [...(site?.graph?.nodes ?? []).map((n): [number, number] => [n.x, n.y])];
   robots.forEach((r) => r.pose && pts.push([r.pose.x, r.pose.y]));
-  if (site?.background && size) {
+  // A background is often bigger than the site: fit what's on it, unless it's all there is.
+  if (!pts.length && site?.background && size) {
     const [ox, oy] = site.background.origin;
     pts.push([ox, oy], [ox + size[0] * site.background.scale, oy + size[1] * site.background.scale]);
   }
@@ -110,7 +111,7 @@ export function SiteMap({ ctx, onLogin }: { ctx: PanelContext; onLogin: () => vo
                 ? <circle r={unit * 2.2} strokeWidth={unit * 0.5} />
                 : <rect x={-unit * 2.1} y={-unit * 2.1} width={unit * 4.2} height={unit * 4.2} rx={unit * 0.5} strokeWidth={unit * 0.5} />}
               <line className="marker__heading" x1={0} y1={0} x2={unit * 3.2 * Math.cos(r.pose.theta)} y2={-unit * 3.2 * Math.sin(r.pose.theta)} strokeWidth={unit * 0.6} />
-              <text x={0} y={unit * 5} textAnchor="middle" fontSize={unit * 2.4}>{r.name}</text>
+              <text x={0} y={unit * 5.6} textAnchor="middle" fontSize={unit * 3}>{r.name}</text>
             </g>
           ))}
         </svg>

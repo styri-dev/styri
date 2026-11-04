@@ -70,7 +70,7 @@ test("a silent robot goes stale, then recovers", async ({ page }) => {
   await expect(hero(page)).toContainText("No data from the robot");
   await expect(hero(page)).toHaveAttribute("data-health", "ok", { timeout: 20_000 });
   await page.getByRole("link", { name: "Activity log" }).click();
-  await expect(page.getByText(/\/odom recovered after \d+ s/).first()).toBeVisible();
+  await expect(page.getByText(/\/battery_state recovered after \d+ s/).first()).toBeVisible();
 });
 
 test("activity log filters and exports CSV", async ({ page }) => {
