@@ -192,6 +192,7 @@ class Settings:
     site_name: str | None = None
     map: str | None = None     # background: map.yaml, or an image with scale and origin
     graph: str | None = None   # node graph, JSON
+    max_off_graph: float = 2.0  # metres from a node, off every edge, before an order is refused
     control: bool = False
     session_hours: float = 8.0
     stop_requires_login: bool = False  # true: Operator stop needs the login, like every other command
@@ -698,7 +699,7 @@ def from_dict(data: Any, env: dict | None = None) -> tuple[list[RobotMap], list[
 
 
 def _settings(data: dict, env: dict, problems: list[str]) -> Settings:
-    site = _Reader(data.get("site"), "site", problems, {"name", "map", "graph"})
+    site = _Reader(data.get("site"), "site", problems, {"name", "map", "graph", "max_off_graph"})
     control = _Reader(data.get("control"), "control", problems, {"enabled", "session_hours", "stop_requires_login"})
     vda = _Reader(data.get("vda"), "vda", problems, {"broker", "interface"})
     b = _Reader(vda.data.get("broker"), "vda.broker", problems, {"bundled", "url", "bind", "port", "tls_cert", "tls_key", "username", "password_env"})
@@ -715,6 +716,7 @@ def _settings(data: dict, env: dict, problems: list[str]) -> Settings:
         problems.append("vda.broker: tls_cert and tls_key go together")
     enabled = control.bool("enabled", False) or (env.get("STYRI_CONTROL") or "").strip().lower() in ("1", "true", "yes")
     return Settings(site_name=site.str("name"), map=site.str("map"), graph=site.str("graph"), control=enabled,
+                    max_off_graph=site.num("max_off_graph", Settings.max_off_graph, positive=True),
                     session_hours=control.num("session_hours", Settings.session_hours, positive=True),
                     stop_requires_login=control.bool("stop_requires_login", False),
                     interface=vda.str("interface", Settings.interface), vda_used="vda" in data,

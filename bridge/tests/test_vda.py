@@ -172,9 +172,20 @@ def test_stopped_mid_edge_on_a_long_edge_is_still_on_the_graph():
 def test_too_far_from_the_graph_to_join_it():
     c, view = client()
     feed(c, "state", state(agvPosition=position(20.0, 20.0)))
-    with pytest.raises(VdaError, match="from the nearest node"):
+    with pytest.raises(VdaError) as refused:
         asyncio.run(c.goal(view, node_id="a"))
+    assert str(refused.value) == ("Robot is 15.6 m from the nearest node. "
+                                  "Move it onto the route with its own controls, then retry.")
     assert c.mqtt.sent == []
+
+
+def test_the_distance_is_a_setting():
+    c, view = client()
+    c.settings = mapping.Settings(max_off_graph=30.0)
+    feed(c, "state", state(agvPosition=position(-20.0, 0.0)))
+    asyncio.run(c.goal(view, node_id="c"))
+    assert len(sent(c, "order")) == 1
+    assert mapping.Settings().max_off_graph == 2.0
 
 
 def test_a_rejected_order_does_not_show_the_cancelled_one_as_done():

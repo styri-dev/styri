@@ -9,6 +9,7 @@ export default defineConfig({
   fullyParallel: false,
   timeout: 90_000,
   expect: { timeout: 10_000 },
+  retries: 0, // a flake should fail and leave its evidence, not pass on a second try
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: process.env.BASE_URL ?? "http://localhost:8080",

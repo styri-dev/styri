@@ -228,6 +228,7 @@ site:
   name: plant-a
   map: /etc/styri/site/map.yaml      # optional background
   graph: /etc/styri/site/graph.json  # node graph for VDA 5050 orders
+  max_off_graph: 2                   # metres from a node, off every edge, before an order is refused
 
 control:
   enabled: true                      # off by default: see SAFETY.md

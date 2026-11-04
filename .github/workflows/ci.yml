@@ -13,7 +13,7 @@ name: CI
 #               STYRI_MIN_VOLTAGE set, and with a mapping file). Each run also proves Styri is
 #               read-only (zero publishers/services) and sends nothing outside the
 #               LAN (no-egress guard, DNS included).
-# Pushes to main and v* tags also:
+# v* tags only, so publishing is one deliberate tag push:
 #   image       build ghcr.io/styri-dev/styri-core natively per architecture, then
 #               publish one multi-arch tag
 #   quickstart  on a clean runner with only Docker, run the exact quickstart command
@@ -133,6 +133,35 @@ jobs:
         env:
           E2E_EDITOR: "1"
         run: npx playwright test --config mixed.config.ts editor
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mixed-fleet-failure
+          path: e2e/test-results
+          if-no-files-found: ignore
+
+  # Not gating: a third party's reading of the standard, on what the acceptance run
+  # puts on the broker. Pinned; its findings are for us to read.
+  vda-conformance:
+    continue-on-error: true
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: examples/mixed-fleet
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the demo, and vda5050-testkit at a pinned commit
+        run: |
+          docker compose build
+          docker build -t vda5050-testkit "https://github.com/ksshen0000/vda5050-testkit.git#49b1f1e2cf11ef9bfaac8b1bdb5602546773c355"
+      - name: Record the acceptance run and check it
+        run: ../../e2e/mixed-fleet/conformance.sh
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vda-conformance
+          path: examples/mixed-fleet/out/conformance
+          if-no-files-found: ignore
 
   e2e:
     name: e2e (${{ matrix.arch }}, styri ${{ matrix.rmw }}, robot ${{ matrix.robot }})
@@ -237,12 +266,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report-${{ strategy.job-index }}
-          path: e2e/playwright-report
+          path: |
+            e2e/playwright-report
+            e2e/test-results
           if-no-files-found: ignore
 
   image:
-    # Only the public repo publishes: a private mirror must never push an image.
-    if: github.event_name != 'pull_request' && github.repository == 'styri-dev/styri'
+    # Tags only, and only the public repo: a merge to main or a private mirror never publishes.
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'styri-dev/styri'
     needs: [unit]
     name: image (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
@@ -313,7 +344,6 @@ jobs:
           images: ${{ env.IMAGE }}
           tags: |
             type=ref,event=tag
-            type=raw,value=main,enable={{is_default_branch}}
             type=sha
       - name: Publish the multi-arch tag
         working-directory: ${{ runner.temp }}/digests
@@ -357,7 +387,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'styri-dev/styri'
-    needs: [unit, colcon, e2e, quickstart]
+    needs: [unit, colcon, e2e, mixed-fleet, quickstart]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

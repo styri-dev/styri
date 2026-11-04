@@ -33,8 +33,7 @@ REPORT_AFTER = 5       # failed tries before saying so, when it was never connec
 STOP_RETRY = 1.0       # seconds between Operator stop retries, until the vehicle stands still
 STOP_GIVE_UP = 15.0    # seconds, then the panel says it isn't confirmed
 FACTSHEET_RETRY = 10.0  # seconds
-MAX_JOIN = 2.0  # metres: further than this from a node, and not on an edge, an order won't start
-ON_EDGE = 0.5  # metres
+ON_EDGE = 0.5  # metres: this close to an edge is on the graph
 DEFAULT_VERSION = "2.1.0"
 NOT_A_FAULT = {"noOrderToCancel"}  # what a vehicle reports when Operator stop finds no order
 
@@ -322,8 +321,9 @@ class VdaClient:
             raise VdaError("this robot's position isn't known yet")
         off_by = math.hypot(pose["x"] - start.x, pose["y"] - start.y) if pose else 0.0
         # Stopped on an edge is on the graph, however long the edge. Off it, only near a node.
-        if off_by > MAX_JOIN and pose and self.graph.off_edges(pose["x"], pose["y"]) > ON_EDGE:
-            raise VdaError(f"this robot is {off_by:.1f} m from the nearest node, {start.id}: move it nearer the graph")
+        if off_by > self.settings.max_off_graph and pose and self.graph.off_edges(pose["x"], pose["y"]) > ON_EDGE:
+            raise VdaError(f"Robot is {off_by:.1f} m from the nearest node. "
+                           "Move it onto the route with its own controls, then retry.")
         route = self.graph.route(start.id, goal.id)
         if route is None:
             raise VdaError(f"no route from {start.id} to {goal.id}")
