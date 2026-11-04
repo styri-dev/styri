@@ -1,0 +1,8 @@
+{
+  "name": "styri-vda-sim",
+  "private": true,
+  "description": "Simulated VDA 5050 vehicles for tests and demos: vda-5050-lib's virtual AGV with a real factsheet.",
+  "type": "commonjs",
+  "scripts": { "start": "node sim.js" },
+  "dependencies": { "vda-5050-lib": "1.7.2" }
+}

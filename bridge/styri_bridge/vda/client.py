@@ -30,6 +30,7 @@ TOPIC_TYPES = {t: f"vda5050/{t}" for t in SUBSCRIBE}
 RECONNECT_AFTER = 2.0  # seconds
 STOP_RETRY = 1.0       # seconds between Operator stop retries, until the vehicle stands still
 STOP_GIVE_UP = 15.0    # seconds, then the panel says it isn't confirmed
+FACTSHEET_RETRY = 10.0  # seconds
 DEFAULT_VERSION = "2.1.0"
 NOT_A_FAULT = {"noOrderToCancel"}  # what a vehicle reports when Operator stop finds no order
 
@@ -48,6 +49,7 @@ class Vehicle:
     cancelled: str | None = None  # the order Styri cancelled: a cleared order then means idle, not done
     stop_until: float = 0.0
     state: dict | None = None
+    next_factsheet_request: float = 0.0
 
     @property
     def key(self) -> tuple[str, str]:
@@ -93,9 +95,9 @@ class VdaClient:
                     self.mqtt, self.connected, reported = client, True, False
                     self.activity.add("connection", "Connected to the MQTT broker", "vda")
                     await client.subscribe(f"{self.settings.interface}/+/+/+/+")
-                    await self._request_factsheets()
                     async for message in client.messages:
                         self.on_message(str(message.topic), message.payload)
+                        await self._request_factsheets()
             except aiomqtt.MqttError as exc:
                 self.mqtt = None
                 if self.connected or not reported:
@@ -108,10 +110,14 @@ class VdaClient:
                 await asyncio.sleep(RECONNECT_AFTER)
 
     async def _request_factsheets(self) -> None:
-        """Retained factsheets arrive by themselves; ask the others, if we may send at all."""
-        await asyncio.sleep(1.0)
+        """Retained factsheets arrive by themselves; ask the vehicles that are up without one, if we may send."""
+        if not self.control:
+            return
+        now = time.monotonic()
         for v in self.vehicles.values():
-            if self.control and v.view.live.factsheet is None and "factsheetRequest" in v.view.map.link.instant_actions:
+            if v.view.live.factsheet is None and v.view.live.online and now >= v.next_factsheet_request \
+                    and "factsheetRequest" in v.view.map.link.instant_actions:
+                v.next_factsheet_request = now + FACTSHEET_RETRY
                 try:
                     await self._instant(v, "factsheetRequest")
                 except VdaError as exc:

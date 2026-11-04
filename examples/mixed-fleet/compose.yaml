@@ -1,0 +1,70 @@
+# Mixed fleet: one ROS 2 sim robot and two VDA 5050 sim vehicles, on one map.
+#
+#   docker compose up --build        then open http://localhost:8080
+#
+# Log in with the password below to command them. Everything here is simulated.
+# With -f no-internet.yaml, the network has no route out, as in the acceptance test.
+
+x-vda: &vda
+  build: ../../e2e/vda-sim
+  image: styri-vda-sim:dev
+  depends_on: [styri]
+  restart: on-failure  # until the broker is up
+  networks: [fleet]
+
+services:
+  styri:
+    build: ../..
+    image: "${STYRI_IMAGE:-styri-core:dev}"
+    environment:
+      ROS_DOMAIN_ID: "42"
+      STYRI_CONFIG: /etc/styri/styri.yaml
+      STYRI_ADMIN_PASSWORD: "${STYRI_ADMIN_PASSWORD:-styri-demo}"
+      AGV07_PASS: demo-07
+      AGV08_PASS: demo-08
+    volumes:
+      - ./styri.yaml:/etc/styri/styri.yaml:ro
+      - ./site:/etc/styri/site:ro
+    ports: ["8080:8080"]
+    networks:
+      fleet:
+        ipv4_address: 172.30.0.10
+
+  amr-01:
+    build: ../../sim
+    image: styri-sim:jazzy
+    environment:
+      ROS_DOMAIN_ID: "42"
+      SIM_NAMESPACE: /amr01
+      SIM_NAV_SERVER: "1"
+    networks: [fleet]
+
+  agv-07:
+    <<: *vda
+    environment:
+      BROKER_URL: mqtt://172.30.0.10:1883
+      MQTT_USER: agv07
+      MQTT_PASSWORD: demo-07
+      SERIAL: SN-0007
+      VDA_VERSION: 2.1.0
+      START_NODE: n1
+      START_X: "2"
+      START_Y: "2"
+
+  agv-08:
+    <<: *vda
+    environment:
+      BROKER_URL: mqtt://172.30.0.10:1883
+      MQTT_USER: agv08
+      MQTT_PASSWORD: demo-08
+      SERIAL: SN-0008
+      VDA_VERSION: 2.0.0
+      START_NODE: n5
+      START_X: "12"
+      START_Y: "2"
+
+networks:
+  fleet:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

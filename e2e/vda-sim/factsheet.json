@@ -1,0 +1,25 @@
+{
+  "typeSpecification": {
+    "seriesName": "virtual", "agvKinematic": "OMNI", "agvClass": "CARRIER", "maxLoadMass": 100,
+    "localizationTypes": ["NATURAL"], "navigationTypes": ["AUTONOMOUS"]
+  },
+  "physicalParameters": {
+    "speedMin": 0.01, "speedMax": 1, "accelerationMax": 1, "decelerationMax": 1,
+    "heightMin": 0.5, "heightMax": 0.5, "width": 0.6, "length": 0.9
+  },
+  "protocolLimits": {
+    "maxStringLens": {}, "maxArrayLens": {}, "timing": {"minOrderInterval": 0.1, "minStateInterval": 0.1}
+  },
+  "protocolFeatures": {
+    "optionalParameters": [],
+    "agvActions": [
+      {"actionType": "startPause", "actionScopes": ["INSTANT"]},
+      {"actionType": "stopPause", "actionScopes": ["INSTANT"]},
+      {"actionType": "cancelOrder", "actionScopes": ["INSTANT"]},
+      {"actionType": "factsheetRequest", "actionScopes": ["INSTANT"]},
+      {"actionType": "stateRequest", "actionScopes": ["INSTANT"]}
+    ]
+  },
+  "agvGeometry": {},
+  "loadSpecification": {}
+}

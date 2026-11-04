@@ -63,9 +63,11 @@ class RosSink:
 
     async def pause(self, view) -> None:
         self._pause.publish(self._Bool(data=True))
+        view.live.paused = True
 
     async def resume(self, view) -> None:
         self._pause.publish(self._Bool(data=False))
+        view.live.paused = False
 
     async def cancel(self, view) -> None:
         if self._cancel is None:

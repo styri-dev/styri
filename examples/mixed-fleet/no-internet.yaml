@@ -1,0 +1,4 @@
+# The acceptance test's network: no route out.
+networks:
+  fleet:
+    internal: true

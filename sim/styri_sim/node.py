@@ -9,14 +9,16 @@ import time
 
 import rclpy
 from action_msgs.msg import GoalInfo, GoalStatus, GoalStatusArray
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry
-from rclpy.executors import ExternalShutdownException
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from sensor_msgs.msg import BatteryState, LaserScan
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 from .model import Limits, SimRobot
 
@@ -36,6 +38,9 @@ PHYSICS_HZ = 50
 # A Nav2-style goal cycle on the NavigateToPose action's topics: a goal runs
 # for NAV_RUN s, then succeeds (every third one fails), then NAV_GAP s idle.
 NAV_RUN, NAV_GAP = 8.0, 4.0
+# SIM_NAV_SERVER=1: a real NavigateToPose server instead of that cycle. Goals
+# drive the robot straight there at NAV_SPEED, and /amcl_pose reports where it is.
+NAV_SPEED = 0.5  # m/s
 
 
 class SimNode(Node):
@@ -64,7 +69,18 @@ class SimNode(Node):
         self._goals: list[GoalStatus] = []
         self._goal_n = 0
         self._goal_started = time.monotonic() + NAV_GAP  # the first goal after a short idle
-        self.create_timer(0.5, self._navigate)
+        if os.environ.get("SIM_NAV_SERVER"):
+            self._goal_pub = self._feedback_pub = None  # the action server has its own
+            self._amcl_pub = self.create_publisher(PoseWithCovarianceStamped, "amcl_pose", reliable)
+            self._nav_paused = False
+            self.create_subscription(Bool, "pause", lambda msg: setattr(self, "_nav_paused", msg.data), reliable)
+            self._nav_server = ActionServer(self, NavigateToPose, "navigate_to_pose", self._drive_to,
+                                            goal_callback=lambda _g: GoalResponse.ACCEPT,
+                                            cancel_callback=lambda _g: CancelResponse.ACCEPT,
+                                            callback_group=ReentrantCallbackGroup())
+            self.create_timer(0.2, self._publish_amcl)
+        else:
+            self.create_timer(0.5, self._navigate)
 
         self._last = time.monotonic()
         self.create_timer(1 / PHYSICS_HZ, self._step)
@@ -174,6 +190,39 @@ class SimNode(Node):
             msg.feedback.distance_remaining = float(max(0.0, 4.0 * (1 - (now - self._goal_started) / NAV_RUN)))
             self._feedback_pub.publish(msg)
 
+    def _drive_to(self, handle):
+        """Straight to the goal, stopping for a cancel. Runs in its own thread."""
+        target = handle.request.pose.pose.position
+        result = NavigateToPose.Result()
+        while True:
+            if handle.is_cancel_requested:
+                handle.canceled()
+                return result
+            if self._nav_paused:
+                time.sleep(0.1)
+                continue
+            dx, dy = target.x - self.robot.x, target.y - self.robot.y
+            distance = math.hypot(dx, dy)
+            if distance < 0.05:
+                handle.succeed()
+                return result
+            step = min(distance, NAV_SPEED * 0.1)
+            self.robot.x += step * dx / distance
+            self.robot.y += step * dy / distance
+            feedback = NavigateToPose.Feedback()
+            feedback.distance_remaining = float(distance)
+            handle.publish_feedback(feedback)
+            time.sleep(0.1)
+
+    def _publish_amcl(self) -> None:
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "map"
+        msg.pose.pose.position.x, msg.pose.pose.position.y = self.robot.x, self.robot.y
+        msg.pose.pose.orientation.z = math.sin(self.robot.theta / 2)
+        msg.pose.pose.orientation.w = math.cos(self.robot.theta / 2)
+        self._amcl_pub.publish(msg)
+
     def _publish_odom(self) -> None:
         if self.robot.silent(time.monotonic()):
             return
@@ -196,7 +245,9 @@ def run() -> None:
     rclpy.init()
     node = SimNode(robot)
     try:
-        rclpy.spin(node)
+        executor = MultiThreadedExecutor()
+        executor.add_node(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:

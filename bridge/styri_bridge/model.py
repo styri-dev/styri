@@ -94,7 +94,8 @@ def describe(view: RobotView, snap: dict) -> dict:
         "battery": tile("battery"), "voltage": tile("voltage"), "errors": live.errors, "warnings": live.warnings,
         "last_seen": None if age is None else round(time.time() - age, 1), "stale": is_stale(view, snap),
         "pose": to_site(live.pose, robot.link.map_offset), "velocity": live.velocity, "driving": live.driving, "paused": live.paused,
-        "task": {"id": live.task_id, "state": live.task_state, "last_node": live.last_node, "route": live.route},
+        "task": {"id": live.task_id, "state": "paused" if live.paused and live.task_state == "active" else live.task_state,
+                 "last_node": live.last_node, "route": live.route},
         "capabilities": capabilities(robot, live), "points": [p[0] for p in robot.link.points],
         "vehicle_stop": live.vehicle_stop, "factsheet": live.factsheet,
     }

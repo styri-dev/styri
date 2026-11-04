@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 
 from websockets.asyncio.server import ServerConnection, broadcast, serve
 from websockets.exceptions import ConnectionClosed
+from websockets.datastructures import Headers
 from websockets.http11 import Request, Response
 
 from . import __version__, model, protocol
@@ -272,12 +273,9 @@ class BridgeServer:
             image = None
         if image is None:
             return connection.respond(HTTPStatus.NOT_FOUND, "no site map\n")
-        response = connection.respond(HTTPStatus.OK, "")
-        del response.headers["Content-Type"]
-        del response.headers["Content-Length"]
-        response.headers["Content-Type"] = image[1]
-        response.headers["Content-Length"] = str(len(image[0]))
-        return response._replace(body=image[0])
+        headers = Headers([("Content-Type", image[1]), ("Content-Length", str(len(image[0]))),
+                           ("Cache-Control", "no-store")])
+        return Response(HTTPStatus.OK.value, HTTPStatus.OK.phrase, headers, image[0])
 
     def _process_request(self, connection: ServerConnection, request: Request) -> Response | None:
         path = urlsplit(request.path).path

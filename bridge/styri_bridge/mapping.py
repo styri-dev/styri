@@ -706,6 +706,8 @@ def _settings(data: dict, env: dict, problems: list[str]) -> Settings:
         problems.append("vda.broker.url: required with bundled: false")
     if url and not re.fullmatch(r"mqtts?://[^/\s]+", url):
         problems.append("vda.broker.url: like mqtt://broker.local:1883")
+    if b.str("bind") in ("0.0.0.0", "::", "127.0.0.1", "localhost"):
+        problems.append("vda.broker.bind: the LAN address to listen on, like 192.168.1.20 (localhost is always on)")
     if b.has("tls_cert") != b.has("tls_key"):
         problems.append("vda.broker: tls_cert and tls_key go together")
     enabled = control.bool("enabled", False) or (env.get("STYRI_CONTROL") or "").strip().lower() in ("1", "true", "yes")
