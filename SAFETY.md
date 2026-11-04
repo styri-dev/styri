@@ -20,7 +20,6 @@ functions in place.
 ## What it can't do
 
 - It needs the panel, the network, the bridge and the robot's software all to work.
-- It needs a login, like every command.
 - A ROS 2 robot may keep moving after the 2 seconds if something else commands it.
 - **A VDA 5050 vehicle that has lost the broker keeps driving the route it already
   has.** Styri can't reach it. Keep routes short.
@@ -33,6 +32,13 @@ functions in place.
 
 - Control is off by default. Off, Styri sends nothing at all.
 - Commands need the admin login and must be on the whitelist in `styri.yaml`.
+- The one exception is stopping, the safe direction. With control on, anyone who
+  can open the panel can press Operator stop or Stop all, so whoever sees a problem
+  can act. Those stops are logged as "anonymous", with the browser's address and
+  user agent, and limited to one per robot every 2 seconds. Stop all takes a
+  one-second press and hold, so a stray tap can't halt the fleet. Undoing a stop
+  (resume, a new goal, teleop) always needs the login.
+- `control.stop_requires_login: true` makes stopping need the login too.
 - Teleop goes out only while the control is held. The bridge caps the speed.
 - If the browser or connection drops during teleop, the bridge sends zero velocity
   within 500 ms. The bridge holds that watchdog, not the browser.
@@ -41,6 +47,9 @@ functions in place.
 - Every command and refusal goes in a local append-only log.
 
 ## On your network
+
+Because stopping needs no login, anyone on the network can keep robots stopped. If
+that's a concern, set `control.stop_requires_login: true`.
 
 The panel uses plain HTTP, so the admin password crosses the network unencrypted.
 Keep it on a network you trust, or put a TLS proxy in front. Until the password

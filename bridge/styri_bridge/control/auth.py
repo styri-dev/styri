@@ -17,6 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 
 ADMIN = "admin"
+ANONYMOUS = "anonymous"
 MIN_PASSWORD = 8
 COOKIE = "styri_session"
 TICKET_SECONDS = 30.0

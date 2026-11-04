@@ -68,6 +68,13 @@ def test_bad_v2_config_is_named(data, needle):
     assert needle in str(exc.value)
 
 
+def test_stop_needs_no_login_unless_the_file_says_so(tmp_path):
+    assert not mapping.load(None, env={}).settings.stop_requires_login
+    path = tmp_path / "styri.yaml"
+    path.write_text("control: {enabled: true, stop_requires_login: true}\n")
+    assert mapping.load(str(path), env={}).settings.stop_requires_login
+
+
 def test_control_is_off_unless_asked():
     assert not mapping.load(None, env={}).settings.control
     assert mapping.load(None, env={"STYRI_CONTROL": "1"}).settings.control

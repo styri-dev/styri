@@ -4,6 +4,10 @@ Every command takes the same path: login, then parse, then the whitelist
 (what the robot's styri.yaml entry allows), then the sink. Whatever happens,
 the audit log gets a line, in the same order.
 
+Stopping is the safe direction, so with control on, whoever sees a problem can
+stop a robot without logging in, unless `control.stop_requires_login` says no.
+Anything that undoes a stop (resume, a new goal, teleop) always needs the login.
+
 Operator stop is a software stop. It is not an emergency stop or a safety function.
 """
 
@@ -12,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -19,7 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 from ..model import RobotView, capabilities, is_stale
 from ..server import BridgeServer, Session, peer_ip
 from . import commands
-from .auth import ADMIN, Admin, token_from
+from .auth import ADMIN, ANONYMOUS, Admin, token_from
 from .commands import CommandError
 from .sinks import LogSink, RosSink
 from .teleop import Teleop
@@ -29,6 +34,7 @@ logger = logging.getLogger("styri_bridge")
 STALE = "This robot's data is stale: teleop and waypoints are off. Operator stop stays available."
 OTHER_DRIVER = "Being driven by another session"
 AUDIT_ROWS = 200
+ANONYMOUS_STOP_EVERY = 2.0  # seconds per robot, for stops without a login
 
 
 class Refused(Exception):
@@ -46,6 +52,9 @@ class Control:
         self.sinks: dict[int, object] = dict(sinks or {})
         self.vda = vda
         self.stopping: set[int] = set()  # robots in their Operator stop: no teleop until it's over
+        self.stop_requires_login = settings.stop_requires_login
+        self.clock = time.monotonic
+        self._anonymous_stops: dict[int, float] = {}  # robot index -> last stop without a login
 
     def attach(self) -> "Control":
         b = self.bridge
@@ -91,19 +100,24 @@ class Control:
 
     def _status(self, session: Session) -> dict:
         return {"enabled": True, "logged_in": self._logged_in(session), "needs_setup": self.admin.needs_setup,
-                "session_hours": self.admin.lifetime / 3600}
+                "session_hours": self.admin.lifetime / 3600, "stop_requires_login": self.stop_requires_login}
 
     def _logged_in(self, session: Session) -> bool:
         return self.admin.valid(session.data.get("token"), touch=False)
 
-    @staticmethod
-    def _user(logged_in: bool) -> str | None:
-        return ADMIN if logged_in else None
+    def _user(self, session: Session) -> str:
+        return ADMIN if self._logged_in(session) else ANONYMOUS
 
-    def _reject(self, session: Session, command: str, reason: str, robot: str | None = None, payload=None) -> dict:
-        self.audit.record("command_rejected", client=session.client, user=self._user(self._logged_in(session)),
-                          action=command, robot=robot, payload=payload, reason=reason)
-        return {"type": "error", "action": command, "robot": robot, "error": reason}
+    @staticmethod
+    def _agent(session: Session) -> str | None:
+        request = session.ws.request
+        return (request.headers.get("User-Agent") or "")[:200] or None if request else None
+
+    def _reject(self, session: Session, command: str, reason: str, robot: str | None = None, payload=None,
+                **extra) -> dict:
+        self.audit.record("command_rejected", client=session.client, user=self._user(session), action=command,
+                          robot=robot, payload=payload, reason=reason, user_agent=self._agent(session))
+        return {"type": "error", "action": command, "robot": robot, "error": reason, **extra}
 
     # ---- login -------------------------------------------------------------
 
@@ -208,12 +222,15 @@ class Control:
     async def _robot_command(self, session: Session, action: str, data: dict) -> dict | None:
         payload = {k: v for k, v in data.items() if k not in ("action", "robot", "id")}
         robot = data.get("robot") if isinstance(data.get("robot"), str) else None
-        if not self.admin.valid(session.data.get("token")):
+        logged_in = self.admin.valid(session.data.get("token"))
+        if not logged_in and not (action == "OPERATOR_STOP" and not self.stop_requires_login):
             return self._reject(session, action, "Log in to control robots.", robot, payload)
         try:
             view = self._view(data)
             robot = view.id
             self._allow(view, action)
+            if action == "OPERATOR_STOP" and not logged_in and self._too_soon(view):
+                return self._reject(session, action, "Stop already sent.", robot, payload, limited=True)
             if action == "TELEOP":
                 return self._drive(session, view, data, payload)
             if action == "TELEOP_RELEASE":
@@ -226,11 +243,19 @@ class Control:
             return self._reject(session, action, str(exc), robot, payload)
         except RuntimeError as exc:  # SinkError, VdaError: couldn't be carried out
             return self._reject(session, action, str(exc), robot, payload)
-        self.audit.record("command", client=session.client, user=ADMIN, action=action, robot=robot,
-                          payload={**payload, **sent})
+        self.audit.record("command", client=session.client, user=self._user(session), action=action, robot=robot,
+                          payload={**payload, **sent}, user_agent=self._agent(session))
         if action == "OPERATOR_STOP":
-            view.monitor.activity.add("warning", f"Operator stop from {session.client}", "control")
+            view.monitor.activity.add("warning", f"Operator stop from {session.client} ({self._user(session)})", "control")
         return {"type": "ack", "action": action, "robot": robot, "id": data.get("id")}
+
+    def _too_soon(self, view: RobotView) -> bool:
+        """A stop without a login goes through once per robot per ANONYMOUS_STOP_EVERY."""
+        now = self.clock()
+        if now - self._anonymous_stops.get(view.index, -ANONYMOUS_STOP_EVERY) < ANONYMOUS_STOP_EVERY:
+            return True
+        self._anonymous_stops[view.index] = now
+        return False
 
     async def _send(self, view: RobotView, action: str, data: dict) -> dict:
         sink = self._sink(view)
@@ -288,10 +313,12 @@ class Control:
                           payload={"event": "stop", "reason": reason})
 
     async def _stop_all(self, session: Session, data: dict) -> dict:
-        if not self.admin.valid(session.data.get("token")):
+        if self.stop_requires_login and not self.admin.valid(session.data.get("token")):
             return self._reject(session, "OPERATOR_STOP_ALL", "Log in to control robots.")
         results = await asyncio.gather(*(self._robot_command(session, "OPERATOR_STOP", {"robot": v.id})
                                          for v in self.bridge.robots if capabilities(v.map, v.live)["can_stop"]))
-        failed = [r["robot"] for r in results if r and r["type"] == "error"]
-        self.audit.record("command", client=session.client, user=ADMIN, action="OPERATOR_STOP_ALL", failed=failed)
+        # A robot whose stop went out moments ago is stopping: that's not a failure.
+        failed = [r["robot"] for r in results if r and r["type"] == "error" and not r.get("limited")]
+        self.audit.record("command", client=session.client, user=self._user(session), action="OPERATOR_STOP_ALL",
+                          failed=failed, user_agent=self._agent(session))
         return {"type": "ack", "action": "OPERATOR_STOP_ALL", "failed": failed, "id": data.get("id")}

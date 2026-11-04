@@ -193,6 +193,7 @@ class Settings:
     graph: str | None = None   # node graph, JSON
     control: bool = False
     session_hours: float = 8.0
+    stop_requires_login: bool = False  # true: Operator stop needs the login, like every other command
     interface: str = "uagv"
     broker: Broker = Broker()
     vda_used: bool = False     # the file has a `vda:` section
@@ -696,7 +697,7 @@ def from_dict(data: Any, env: dict | None = None) -> tuple[list[RobotMap], list[
 
 def _settings(data: dict, env: dict, problems: list[str]) -> Settings:
     site = _Reader(data.get("site"), "site", problems, {"name", "map", "graph"})
-    control = _Reader(data.get("control"), "control", problems, {"enabled", "session_hours"})
+    control = _Reader(data.get("control"), "control", problems, {"enabled", "session_hours", "stop_requires_login"})
     vda = _Reader(data.get("vda"), "vda", problems, {"broker", "interface"})
     b = _Reader(vda.data.get("broker"), "vda.broker", problems, {"bundled", "url", "bind", "port", "tls_cert", "tls_key", "username", "password_env"})
     url = b.str("url")
@@ -713,6 +714,7 @@ def _settings(data: dict, env: dict, problems: list[str]) -> Settings:
     enabled = control.bool("enabled", False) or (env.get("STYRI_CONTROL") or "").strip().lower() in ("1", "true", "yes")
     return Settings(site_name=site.str("name"), map=site.str("map"), graph=site.str("graph"), control=enabled,
                     session_hours=control.num("session_hours", Settings.session_hours, positive=True),
+                    stop_requires_login=control.bool("stop_requires_login", False),
                     interface=vda.str("interface", Settings.interface), vda_used="vda" in data,
                     broker=Broker(url=url, bind=b.str("bind"), port=int(b.num("port", Broker.port, positive=True)),
                                   tls_cert=b.str("tls_cert"), tls_key=b.str("tls_key"),

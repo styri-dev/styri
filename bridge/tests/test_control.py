@@ -97,16 +97,98 @@ def test_commands_need_a_login_and_viewing_does_not():
     async def go(url, server, audit, sink, control):
         async with connect(url) as ws:
             hello = json.loads(await ws.recv())
-            assert hello["control"] == {"enabled": True, "logged_in": False, "needs_setup": False, "session_hours": 8.0}
+            assert hello["control"] == {"enabled": True, "logged_in": False, "needs_setup": False, "session_hours": 8.0,
+                                        "stop_requires_login": False}
             for msg in ({"action": "TELEOP", "robot": "a", "linear": 0.1, "angular": 0},
                         {"action": "GOAL", "robot": "a", "x": 1, "y": 1}, {"action": "PAUSE", "robot": "a"},
-                        {"action": "OPERATOR_STOP", "robot": "a"}, {"action": "OPERATOR_STOP_ALL"}):
+                        {"action": "RESUME", "robot": "a"}, {"action": "CANCEL", "robot": "a"}):
                 reply = await ask(ws, **msg)
                 assert reply["type"] == "error" and "Log in" in reply["error"]
             assert (await ask(ws, action="PING", t=1))["type"] == "pong"
             assert (await ask(ws, action="AUDIT"))["type"] == "error"
         assert sink.calls == [] and sink.vel == []
         assert len(rows(audit, "command_rejected")) == 5
+    bridge(go)
+
+
+def test_anyone_can_stop_and_it_is_audited_as_anonymous():
+    async def go(url, server, audit, sink, control):
+        async with connect(url, user_agent_header="floor-tablet") as ws:
+            assert (await ask(ws, action="OPERATOR_STOP", robot="a"))["type"] == "ack"
+        assert sink.calls == [("stop",)]
+        (row,) = rows(audit, "command")
+        assert row["user"] == "anonymous" and row["client"] == "127.0.0.1" and row["user_agent"] == "floor-tablet"
+    bridge(go)
+
+
+def test_anonymous_stop_all_reaches_the_fleet():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            reply = await ask(ws, action="OPERATOR_STOP_ALL")
+            assert reply["type"] == "ack" and reply["failed"] == []
+        assert sink.calls == [("stop",)]
+        assert {r["user"] for r in rows(audit, "command")} == {"anonymous"}
+    bridge(go)
+
+
+def test_undoing_a_stop_needs_the_login():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await ask(ws, action="OPERATOR_STOP", robot="a")
+            for msg in ({"action": "RESUME", "robot": "a"}, {"action": "GOAL", "robot": "a", "x": 1, "y": 1},
+                        {"action": "TELEOP", "robot": "a", "linear": 0.1, "angular": 0}):
+                reply = await ask(ws, **msg)
+                assert reply["type"] == "error" and "Log in" in reply["error"], msg
+        assert sink.calls == [("stop",)]
+        assert not [v for v in sink.vel if v[1] != 0.0]
+    bridge(go)
+
+
+def test_anonymous_stops_are_rate_limited_per_robot_and_every_one_is_logged():
+    async def go(url, server, audit, sink, control):
+        now = [100.0]
+        control.clock = lambda: now[0]
+        async with connect(url) as ws:
+            assert (await ask(ws, action="OPERATOR_STOP", robot="a"))["type"] == "ack"
+            now[0] += 1.9
+            reply = await ask(ws, action="OPERATOR_STOP", robot="a")
+            assert reply["type"] == "error" and reply["limited"]
+            now[0] += 0.2
+            assert (await ask(ws, action="OPERATOR_STOP", robot="a"))["type"] == "ack"
+        assert sink.calls == [("stop",), ("stop",)]
+        assert [r["kind"] for r in rows(audit)] == ["command", "command_rejected", "command"]
+    bridge(go)
+
+
+def test_a_limited_robot_is_not_a_failed_stop_all():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await ask(ws, action="OPERATOR_STOP", robot="a")
+            assert (await ask(ws, action="OPERATOR_STOP_ALL"))["failed"] == []
+    bridge(go)
+
+
+def test_a_login_is_never_rate_limited():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await login(ws)
+            for _ in range(3):
+                assert (await ask(ws, action="OPERATOR_STOP", robot="a"))["type"] == "ack"
+        assert len(sink.calls) == 3 and {r["user"] for r in rows(audit, "command")} == {"admin"}
+    bridge(go)
+
+
+def test_a_site_can_lock_the_stop_down():
+    async def go(url, server, audit, sink, control):
+        control.stop_requires_login = True
+        async with connect(url) as ws:
+            assert json.loads(await ws.recv())["control"]["stop_requires_login"]
+            for msg in ({"action": "OPERATOR_STOP", "robot": "a"}, {"action": "OPERATOR_STOP_ALL"}):
+                assert "Log in" in (await ask(ws, **msg))["error"]
+            assert sink.calls == []
+            await login(ws)
+            assert (await ask(ws, action="OPERATOR_STOP", robot="a"))["type"] == "ack"
+        assert sink.calls == [("stop",)]
     bridge(go)
 
 

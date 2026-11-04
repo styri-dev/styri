@@ -22,13 +22,15 @@ test("the fleet shows both protocols, one verdict each", async ({ page }) => {
   await expect(page.locator(".badge-protocol", { hasText: "VDA 5050" })).toHaveCount(2);
 });
 
-test("locked until login; the stop line is always under the button", async ({ page }) => {
+test("without a login: Operator stop works, and everything else waits for one", async ({ page }) => {
   await open(page, "amr-01");
   await expect(page.getByRole("button", { name: "Log in to control robots" })).toBeVisible();
-  await expect(page.getByTestId("operator-stop")).toHaveCount(0);
-  await login(page);
-  await expect(page.getByTestId("operator-stop")).toBeVisible();
   await expect(page.getByText("Software stop, not a safety function").first()).toBeVisible();
+  await expect(page.getByTestId("joystick")).toHaveCount(0);
+  await page.getByTestId("operator-stop").click();
+  await expect(page.getByTestId("notice")).toHaveCount(0);
+  await page.goto("/#activity");
+  await expect(page.getByText(/Operator stop from .* \(anonymous\)/).first()).toBeVisible();
 });
 
 test("only the controls a robot supports: a VDA vehicle has no joystick", async ({ page }) => {
@@ -66,12 +68,24 @@ test("one tap on the map, one Send: a VDA vehicle snaps to a node", async ({ pag
   await expect(page.getByTestId("notice")).toHaveCount(0);
 });
 
-test("Stop all reaches the fleet", async ({ page }) => {
-  await page.goto("/#fleet");
-  await login(page);
-  await page.getByTestId("stop-all").click();
-  await page.goto("/#overview");
-  await expect(page.getByText("Operator stop").first()).toBeVisible();
+test("Stop all: a tap does nothing, a one-second hold stops the fleet", async ({ page }) => {
+  await page.waitForTimeout(2100); // past the anonymous limit from the test above
+  await page.goto("/#activity");
+  const stops = page.getByText(/Operator stop from/);
+  await expect(page.locator(".tab--active")).toContainText("Activity");
+  await page.waitForTimeout(1000);
+  const before = await stops.count();
+  const box = (await page.getByTestId("stop-all").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(300);
+  await page.mouse.up();
+  await page.waitForTimeout(1200);
+  expect(await stops.count()).toBe(before);
+  await page.mouse.down();
+  await page.waitForTimeout(1200);
+  await page.mouse.up();
+  await expect.poll(() => stops.count()).toBeGreaterThan(before);
 });
 
 test("at 390 px the joystick is a real touch target and the page doesn't scroll sideways", async ({ page }) => {

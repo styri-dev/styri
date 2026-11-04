@@ -34,6 +34,7 @@ export interface ControlStatus {
   logged_in: boolean;
   needs_setup: boolean;
   session_hours: number;
+  stop_requires_login: boolean;
 }
 
 export interface Capabilities {

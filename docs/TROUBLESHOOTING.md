@@ -110,6 +110,8 @@ that isn't in `styri.yaml`.
   and set a new one, or set `STYRI_ADMIN_PASSWORD`, which takes priority.
 - **"Log in to control robots" after a restart.** Sessions don't survive a
   restart, on purpose.
+- **"Stop already sent."** Without a login, a robot takes one stop every 2 seconds.
+  The first one went through.
 - **Too many attempts.** Five wrong passwords lock that address out for a minute.
 - **Buttons missing.** The panel shows only what a robot supports: a ROS 2 robot
   needs `cmd_vel` for the joystick, `nav2_action` for waypoints and Cancel, and

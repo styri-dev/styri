@@ -232,6 +232,7 @@ site:
 control:
   enabled: true                      # off by default: see SAFETY.md
   session_hours: 8                   # a login ends after this long unused
+  stop_requires_login: false         # true: Operator stop and Stop all need the login too
 
 vda:
   broker:

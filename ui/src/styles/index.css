@@ -338,6 +338,10 @@ button { font: inherit; }
 .chip--btn { cursor: pointer; font: inherit; font-size: var(--fs-sm); background: transparent; color: var(--text-1); }
 .stopall { height: 40px; padding: 0 var(--sp-4); border: 0; border-radius: var(--r-2); background: var(--stop-500); color: var(--white); font: inherit; font-weight: 800; cursor: pointer; white-space: nowrap; }
 .stopall:hover { background: var(--stop-600); }
+.stopall { position: relative; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.stopall__word { position: relative; }
+.stopall__fill { position: absolute; inset: 0; width: 0; background: var(--stop-600); }
+.stopall.is-holding .stopall__fill { width: 100%; transition: width 1s linear; }
 
 /* Login */
 .modal { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: var(--sp-4); background: rgb(0 0 0 / 0.55); }
@@ -353,7 +357,7 @@ button { font: inherit; }
 /* Control drawer */
 .detail { padding-top: 0; }
 .drawer { display: flex; flex-wrap: wrap; gap: var(--sp-5); padding: var(--sp-5); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-3); }
-.drawer--locked { justify-content: center; }
+.drawer--locked { align-items: center; }
 .drawer__main { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
 .drawer__row { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .drawer__stop { flex: 0 1 240px; margin-left: auto; display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-2); padding-left: var(--sp-5); border-left: 1px solid var(--line); }

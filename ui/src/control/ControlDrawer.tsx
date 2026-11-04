@@ -113,15 +113,25 @@ function Joystick({ robot, send, maxLinear, maxAngular, blocked }: {
 export function ControlDrawer({ ctx, robot, onLogin }: { ctx: PanelContext; robot: RobotModel; onLogin: () => void }) {
   const control = ctx.state.control;
   if (!control?.enabled) return null;
+  const caps = robot.capabilities;
+  const send = (action: string, extra: Record<string, unknown> = {}) => ctx.send({ action, robot: robot.id, ...extra });
+  const stopButton = caps.can_stop && (
+    <div className="drawer__stop">
+      <button type="button" className="opstop" data-testid="operator-stop" onClick={() => send("OPERATOR_STOP")}>Operator stop</button>
+      <span className="small strong center">{SOFTWARE_STOP}</span>
+    </div>
+  );
   if (!control.logged_in) {
+    // Stopping needs no login, unless the site says so. Undoing one always does.
     return (
       <section className="drawer drawer--locked" data-testid="control-drawer">
-        <button type="button" className="btn btn--solid" onClick={onLogin}>Log in to control robots</button>
+        <div className="drawer__main">
+          <button type="button" className="btn btn--solid" onClick={onLogin}>Log in to control robots</button>
+        </div>
+        {!control.stop_requires_login && stopButton}
       </section>
     );
   }
-  const caps = robot.capabilities;
-  const send = (action: string, extra: Record<string, unknown> = {}) => ctx.send({ action, robot: robot.id, ...extra });
   const notice = ctx.state.notice && (ctx.state.notice.robot == null || ctx.state.notice.robot === robot.id) ? ctx.state.notice : undefined;
   const stale = robot.stale;
   const active = robot.task.state === "active" || robot.task.state === "paused";
@@ -141,12 +151,7 @@ export function ControlDrawer({ ctx, robot, onLogin }: { ctx: PanelContext; robo
           {caps.can_cancel && <button type="button" className="btn btn--plain" disabled={!active} onClick={() => send("CANCEL")}>Cancel task</button>}
         </div>
       </div>
-      {caps.can_stop && (
-        <div className="drawer__stop">
-          <button type="button" className="opstop" data-testid="operator-stop" onClick={() => send("OPERATOR_STOP")}>Operator stop</button>
-          <span className="small strong center">{SOFTWARE_STOP}</span>
-        </div>
-      )}
+      {stopButton}
     </section>
   );
 }
