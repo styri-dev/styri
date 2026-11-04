@@ -88,6 +88,13 @@ def test_no_order_to_cancel_is_not_a_fault():
     assert view.monitor.evaluate()["health"]["level"] == "ok"
 
 
+def test_the_first_message_sets_the_version_we_speak():
+    c, view = client()
+    feed(c, "connection", {**header(), "connectionState": "ONLINE"})
+    asyncio.run(c.pause(view))
+    assert sent(c, "instantActions")[0]["version"] == "2.0.0"
+
+
 def test_connection_lost_means_stale():
     c, view = client()
     feed(c, "connection", {**header(), "connectionState": "ONLINE"})

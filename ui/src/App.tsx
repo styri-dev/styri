@@ -3,8 +3,12 @@ import { type BridgeState, bridgeUrl, forRobot, useBridge, useNow } from "./brid
 import { clock } from "./format";
 import { Activity } from "./tabs/Activity";
 import { Configuration } from "./tabs/Configuration";
-import { Controls } from "./tabs/Controls";
+import { Login, StopAll } from "./control/Header";
+import { RobotDetail } from "./control/RobotDetail";
+import { RobotSwitcher } from "./RobotSwitcher";
+import { Fleet } from "./tabs/Fleet";
 import { Overview } from "./tabs/Overview";
+import { SiteMap } from "./tabs/SiteMap";
 import { Topics } from "./tabs/Topics";
 
 const URL = bridgeUrl();
@@ -12,7 +16,6 @@ const TABS = [
   ["overview", "Overview"],
   ["topics", "Topics"],
   ["activity", "Activity log"],
-  ["controls", "Controls"],
   ["configuration", "Configuration"],
 ] as const;
 // Shorter labels where the tab bar is narrow.
@@ -40,7 +43,6 @@ export interface PanelPlugin {
   tabs?: PanelTab[];
   defaultTab?: string; // used while that tab is visible
   hideOnPhones?: string[]; // tab keys
-  header?: (ctx: PanelContext) => ReactNode; // in place of the robot name
   banner?: (ctx: PanelContext) => ReactNode; // under the tabs
 }
 
@@ -69,20 +71,32 @@ export function Logo() {
   );
 }
 
+function logout(send: PanelContext["send"]) {
+  send({ action: "LOGOUT" });
+  void fetch("/api/logout", { cache: "no-store" });
+}
+
 export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
   const { state, select, send, retryNow } = useBridge(URL);
   const now = useNow();
   const extra = (plugin.tabs ?? []).filter((t) => !t.visible || t.visible(state));
+  // With several robots (or some not shown), the fleet comes first; the map when there's one to draw.
+  const manyRobots = (state.hello?.robots?.length ?? 0) > 1 || (state.hello?.not_shown?.length ?? 0) > 0;
+  const hasMap = !!(state.hello?.site?.graph || state.hello?.site?.background || state.fleet.some((r) => r.pose));
   const tabs: { key: string; label: string; short?: string }[] = [
+    ...(manyRobots ? [{ key: "fleet", label: "Fleet" }] : []),
+    ...(hasMap ? [{ key: "map", label: "Map" }] : []),
     ...extra.filter((t) => t.first),
     ...TABS.map(([key, label]) => ({ key, label, short: SHORT[key] })),
     ...extra.filter((t) => !t.first),
   ];
   const keys = tabs.map((t) => t.key);
-  const fallback = plugin.defaultTab && keys.includes(plugin.defaultTab) ? plugin.defaultTab : "overview";
+  const fallback = plugin.defaultTab && keys.includes(plugin.defaultTab) ? plugin.defaultTab
+    : keys.includes("fleet") ? "fleet" : "overview";
   const [tab, setTab] = useState(() => tabFromHash(keys, fallback));
   const [robot, setRobotIndex] = useState(0);
   const [theme] = useState(initialTheme);
+  const [loginOpen, setLoginOpen] = useState(false);
 
   const keyList = keys.join(",");
   useEffect(() => {
@@ -113,7 +127,6 @@ export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
 
   const snap = view.snapshot;
   const noRobot = !!snap && !snap.robot_found && !disc;
-  const robotName = state.hello?.robots?.[robot]?.name ?? snap?.robot ?? state.hello?.robot ?? "—";
   const retryIn = state.retryAt ? Math.max(0, Math.ceil((state.retryAt - now) / 1000)) : 0;
   const ctx: PanelContext = { state, robot, setRobot, send, now };
   // The per-robot tabs see the selected robot's name, domain and namespace.
@@ -138,15 +151,20 @@ export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
           <span className="wordmark">styri</span>
         </div>
         <div className="header__rule" />
-        {plugin.header
-          ? plugin.header(ctx)
-          : <span className="mono header__robot" title={`Robot: ${robotName}`}>{robotName}</span>}
+        <RobotSwitcher ctx={ctx} />
         <span className={`field__conn ${disc ? "is-warn" : ""}`} title={`Bridge at ${location.host}`}>
           <span className={`dot ${conn.cls}`} />
           {conn.word}
         </span>
         <div className="spacer" />
-        <span className="chip">Local only · no account · no cloud</span>
+        <StopAll ctx={ctx} onLogin={() => setLoginOpen(true)} />
+        {state.control?.enabled && (
+          <button type="button" className="chip chip--btn" data-testid="login-toggle"
+            onClick={() => (state.control?.logged_in ? logout(send) : setLoginOpen(true))}>
+            {state.control.logged_in ? "Log out" : "Log in"}
+          </button>
+        )}
+        <span className="chip chip--local">Local only · no cloud</span>
         <span className="mono header__clock">{clock(new Date(now))}</span>
       </header>
 
@@ -160,7 +178,6 @@ export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
             {key === "configuration" && snap?.mappings?.some((m) => m.status === "missing" || m.status === "error") &&
               <span className="tab__alert" aria-label="needs attention">▲</span>}
             {key === "topics" && snap && <span className="tab__note">{snap.topics.length}</span>}
-            {key === "controls" && <span className="tab__note tab__note--soon">SOON</span>}
           </a>
         ))}
       </nav>
@@ -175,12 +192,18 @@ export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
         </div>
       )}
       {plugin.banner?.(ctx)}
+      {loginOpen && <Login ctx={ctx} onClose={() => setLoginOpen(false)} />}
 
       <main className="main">
         {extra.filter((t) => t.key === tab).map((t) => <div key={t.key}>{t.render(ctx)}</div>)}
+        {tab === "fleet" && <Fleet ctx={ctx} />}
+        {tab === "map" && <SiteMap ctx={ctx} onLogin={() => setLoginOpen(true)} />}
         {tab === "overview" && (
-          <Overview snap={snap} hello={hello} disc={disc} discAge={discAge} noRobot={noRobot}
-            latencyMs={state.latencyMs} />
+          <>
+            <Overview snap={snap} hello={hello} disc={disc} discAge={discAge} noRobot={noRobot}
+              latencyMs={state.latencyMs} protocol={state.hello?.robots?.[robot]?.protocol} />
+            <RobotDetail ctx={ctx} onLogin={() => setLoginOpen(true)} />
+          </>
         )}
         {tab === "topics" && (
           <Topics snap={snap} disc={disc} discAge={discAge} robot={robot}
@@ -188,7 +211,6 @@ export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
             select={select} />
         )}
         {tab === "activity" && <Activity events={state.events} now={now} />}
-        {tab === "controls" && <Controls snap={snap} history={view.history} />}
         {tab === "configuration" && <Configuration snap={snap} hello={hello} />}
       </main>
     </div>

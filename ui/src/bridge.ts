@@ -13,7 +13,95 @@ export interface Hello {
   controls: boolean;
   min_voltage: number | null; // battery.min_voltage / STYRI_MIN_VOLTAGE, if set
   config?: ConfigSummary;
-  robots?: { index: number; name: string; domain: string; namespace: string | null }[]; // Core: one; extensions may add more
+  robots?: { index: number; name: string; domain: string; namespace: string | null; protocol?: Protocol }[];
+  not_shown?: NotShown[];
+  site?: Site;
+  control?: ControlStatus; // absent with control off: the panel is view-only
+}
+
+export type Protocol = "ros2" | "vda5050";
+
+/** A robot in the file, over the cap. */
+export interface NotShown {
+  name: string;
+  protocol: Protocol;
+  reason: string;
+  link: string;
+}
+
+export interface ControlStatus {
+  enabled: boolean;
+  logged_in: boolean;
+  needs_setup: boolean;
+  session_hours: number;
+}
+
+export interface Capabilities {
+  can_teleop: boolean;
+  can_waypoint: boolean;
+  can_pause: boolean;
+  can_cancel: boolean;
+  can_stop: boolean;
+}
+
+export interface Pose {
+  x: number;
+  y: number;
+  theta: number;
+  map_id: string;
+}
+
+/** The unified robot model: the same for every protocol. */
+export interface RobotModel {
+  index: number;
+  id: string;
+  name: string;
+  protocol: Protocol;
+  vendor: string | null;
+  model: string | null;
+  verdict: "OK" | "WARNING" | "FAULT" | "NO DATA";
+  reason: string;
+  battery: number | null;
+  voltage: number | null;
+  errors: { type: string; level: string; description: string }[];
+  warnings: string[];
+  last_seen: number | null; // unix seconds
+  stale: boolean;
+  pose: Pose | null;
+  velocity: { linear: number; angular: number } | null;
+  driving: boolean | null;
+  paused: boolean;
+  task: { id: string | null; state: "idle" | "active" | "paused" | "failed" | "done"; last_node: string | null; route: string[] };
+  capabilities: Capabilities;
+  limits: { max_linear: number; max_angular: number };
+  points: string[];
+  vehicle_stop: boolean;
+  factsheet: Record<string, any> | null;
+}
+
+export interface GraphNode {
+  id: string;
+  x: number;
+  y: number;
+  map_id: string;
+}
+
+export interface Site {
+  graph: { nodes: GraphNode[]; edges: { id: string; start: string; end: string }[] } | null;
+  background: { url: string; scale: number; origin: [number, number] } | null;
+  problems: string[];
+}
+
+export interface AuditRow {
+  id: number;
+  time: string;
+  kind: "command" | "command_rejected";
+  client: string | null;
+  user: string | null;
+  command: string;
+  robot?: string | null;
+  reason?: string;
+  payload?: Record<string, unknown>;
 }
 
 /** Where the topic mapping came from (hello.config). */
@@ -123,6 +211,11 @@ export interface BridgeState {
   latencyMs?: number;
   retryAt?: number; // Date.now() of the next reconnect attempt
   message?: TopicMessage;
+  fleet: RobotModel[];
+  control?: ControlStatus;
+  authError?: string;
+  notice?: { text: string; robot?: string | null; at: number }; // the bridge refused a command
+  audit: AuditRow[];
 }
 
 const NO_HISTORY: History = { cpuTemp: [], load: [] };
@@ -145,7 +238,7 @@ export function bridgeUrl(): string {
 }
 
 export function useBridge(url: string) {
-  const [state, setState] = useState<BridgeState>({ conn: "connecting", events: [], snapshots: {}, snapshotAt: {}, history: {} });
+  const [state, setState] = useState<BridgeState>({ conn: "connecting", events: [], snapshots: {}, snapshotAt: {}, history: {}, fleet: [], audit: [] });
   const wsRef = useRef<WebSocket | null>(null);
   const connectNow = useRef<() => void>(() => {});
 
@@ -181,7 +274,24 @@ export function useBridge(url: string) {
         }
         switch (msg.type) {
           case "hello":
-            setState((s) => ({ ...s, hello: msg }));
+            setState((s) => ({ ...s, hello: msg, control: msg.control }));
+            break;
+          case "fleet":
+            setState((s) => ({ ...s, fleet: msg.robots }));
+            break;
+          case "auth":
+            // The cookie is HttpOnly, so the bridge sets it: a reload stays logged in.
+            if (msg.ticket) void fetch(`/api/session?ticket=${encodeURIComponent(msg.ticket)}`, { cache: "no-store" });
+            setState((s) => ({ ...s, control: msg.control, authError: msg.error }));
+            break;
+          case "error":
+            if (msg.action !== "AUDIT") setState((s) => ({ ...s, notice: { text: msg.error, robot: msg.robot, at: Date.now() } }));
+            break;
+          case "ack":
+            setState((s) => ({ ...s, notice: undefined }));
+            break;
+          case "audit":
+            setState((s) => ({ ...s, audit: msg.rows }));
             break;
           case "snapshot": {
             const i: number = msg.robot_index ?? 0;
@@ -241,7 +351,7 @@ export function useBridge(url: string) {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ action: "SELECT", topic, robot }));
   }, []);
 
-  /** Send any action an extension handles (Core itself only knows PING and SELECT). */
+  /** Send a command. With control off, the bridge refuses everything but PING and SELECT. */
   const send = useCallback((payload: Record<string, unknown>) => {
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));

@@ -149,6 +149,9 @@ class VdaClient:
             self._warnings(vehicle)
         monitor = vehicle.view.monitor
         monitor.message(kind, message)
+        # Speak the vehicle's version, from its very first message.
+        if isinstance(message.get("version"), str):
+            vehicle.version = message["version"]
         try:
             if kind == "state":
                 self._on_state(vehicle, message)
@@ -197,8 +200,6 @@ class VdaClient:
     def _on_state(self, v: Vehicle, msg: dict) -> None:
         live, monitor = v.view.live, v.view.monitor
         v.state = msg
-        if isinstance(msg.get("version"), str):
-            v.version = msg["version"]
         # Some vehicles send no connection topic; a state message says they're there.
         if live.online is False and v.view.monitor.topics["connection"].last is None:
             live.online = True

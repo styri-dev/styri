@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Health, Hello, Level, MappingRow, Snapshot, Tile } from "../bridge";
+import type { Health, Hello, Level, MappingRow, Protocol, Snapshot, Tile } from "../bridge";
 import { ageText, num, shown } from "../format";
 
 const HERO: Record<Health, { glyph: string; word: string }> = {
@@ -109,9 +109,13 @@ export function Overview(props: {
   discAge: number;
   noRobot: boolean;
   latencyMs?: number;
+  protocol?: Protocol;
 }) {
-  const { snap, hello, disc, discAge, noRobot, latencyMs } = props;
+  const { snap, hello, disc, discAge, noRobot, latencyMs, protocol } = props;
   if (!snap) return <p className="empty">Waiting for the bridge…</p>;
+  if (noRobot && protocol === "vda5050") {
+    return <p className="empty">No messages from this vehicle yet. Check that it's on the broker: <code>styri check</code> lists what it sees.</p>;
+  }
   if (noRobot) return <NoRobot snap={snap} domain={hello?.domain ?? snap.domain} version={hello?.version}
     fromFile={!!hello?.config && hello.config.source !== "environment"} />;
 

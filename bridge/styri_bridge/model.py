@@ -96,7 +96,8 @@ def describe(view: RobotView, snap: dict) -> dict:
         "pose": to_site(live.pose, robot.link.map_offset), "velocity": live.velocity, "driving": live.driving, "paused": live.paused,
         "task": {"id": live.task_id, "state": "paused" if live.paused and live.task_state == "active" else live.task_state,
                  "last_node": live.last_node, "route": live.route},
-        "capabilities": capabilities(robot, live), "points": [p[0] for p in robot.link.points],
+        "capabilities": capabilities(robot, live),
+        "limits": {"max_linear": robot.link.max_linear, "max_angular": robot.link.max_angular}, "points": [p[0] for p in robot.link.points],
         "vehicle_stop": live.vehicle_stop, "factsheet": live.factsheet,
     }
 
