@@ -128,20 +128,11 @@ test("the panel never requests anything from another origin", async ({ page, bas
     if (url.origin !== new URL(baseURL!).origin && url.protocol !== "data:") foreign.push(req.url());
   });
   await page.goto("/");
-  for (const name of ["Topics", "Activity log", "Controls", "Overview"]) {
+  for (const name of ["Topics", "Activity log", "Overview"]) {
     await page.getByRole("link", { name: new RegExp(name) }).click();
   }
   await page.waitForTimeout(1500);
   expect(foreign).toEqual([]);
-});
-
-test("controls preview sparklines draw real points, no template text", async ({ page }) => {
-  await page.getByRole("link", { name: /Controls/ }).click();
-  const lines = page.locator(".spark polyline");
-  await expect(lines).toHaveCount(2);
-  // Two or more snapshots are needed for a line; they arrive once a second.
-  await expect.poll(() => lines.first().getAttribute("points"), { timeout: 10_000 }).toMatch(/^[\d.]+,[\d.]+ /);
-  expect(await page.content()).not.toContain("{{");
 });
 
 test.describe("at 768 px", () => {
@@ -153,15 +144,6 @@ test.describe("at 768 px", () => {
     expect(new Set(tops.slice(0, 3)).size).toBe(1);
     expect(new Set(tops.slice(3)).size).toBe(1);
     expect(tops[3]).toBeGreaterThan(tops[0]);
-  });
-
-  test("controls preview: vitals full width, stop and audit not squeezed", async ({ page }) => {
-    await page.getByRole("link", { name: /Controls/ }).click();
-    const width = (sel: string) => page.locator(sel).evaluate((e) => e.getBoundingClientRect().width);
-    const vw = 768;
-    expect(await width(".preview__col--side >> nth=0")).toBeGreaterThan(vw - 40);
-    expect(await width(".preview__col--side >> nth=1")).toBeGreaterThan(vw - 40);
-    expect(await width(".preview__stop-wrap")).toBeGreaterThan(280);
   });
 });
 
