@@ -6,6 +6,7 @@ import json
 import sqlite3
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 _SCHEMA = """
@@ -18,6 +19,10 @@ CREATE TABLE IF NOT EXISTS events (
     action  TEXT,
     detail  TEXT
 );
+CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
+    BEGIN SELECT RAISE(ABORT, 'the log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
+    BEGIN SELECT RAISE(ABORT, 'the log is append-only'); END;
 """
 
 
@@ -28,7 +33,7 @@ class AuditLog:
         self._lock = threading.Lock()
         self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute(_SCHEMA)
+        self._db.executescript(_SCHEMA)
         columns = {row[1] for row in self._db.execute("PRAGMA table_info(events)")}
         if "user" not in columns:  # databases from v0.1.0
             self._db.execute("ALTER TABLE events ADD COLUMN user TEXT")
@@ -46,6 +51,20 @@ class AuditLog:
             return self._db.execute(
                 "SELECT id, ts, kind, client, user, action, detail FROM events ORDER BY id"
             ).fetchall()
+
+    def commands(self, robot: str | None = None, limit: int | None = None) -> list[dict]:
+        """Commands and rejections, oldest first: who, when, which robot, what."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, ts, kind, client, user, action, detail FROM events "
+                "WHERE kind IN ('command', 'command_rejected') ORDER BY id").fetchall()
+        out = []
+        for id_, ts, kind, client, user, action, detail in rows:
+            d = json.loads(detail) if detail else {}
+            if robot is None or d.get("robot") == robot:
+                out.append({"id": id_, "time": datetime.fromtimestamp(ts, timezone.utc).isoformat(), "kind": kind,
+                            "client": client, "user": user, "command": action, **d})
+        return out[-limit:] if limit else out
 
     def close(self) -> None:
         with self._lock:

@@ -113,6 +113,8 @@ class Value:
     # (case-insensitive substrings) instead of a field path.
     diag_status: str | None = None
     diag_key: str | None = None
+    # The message may leave this field out, and that isn't a problem to report.
+    optional: bool = False
 
     def describe(self) -> str:
         if self.topic is None:
@@ -179,6 +181,8 @@ class Broker:
     port: int = 1883
     tls_cert: str | None = None
     tls_key: str | None = None
+    username: str | None = None      # Styri's own login on a site's broker
+    password_env: str | None = None
 
 
 @dataclass(frozen=True)
@@ -191,6 +195,7 @@ class Settings:
     session_hours: float = 8.0
     interface: str = "uagv"
     broker: Broker = Broker()
+    vda_used: bool = False     # the file has a `vda:` section
 
 
 @dataclass(frozen=True)
@@ -523,7 +528,7 @@ def _vda_robot(data: dict, name: str, stale: float | None, link: Link, section, 
                     Rule(warn_below=b.num("warn_below", 25.0), fault_below=b.num("fault_below", 10.0),
                          hysteresis=b.num("hysteresis", 2.0)), bstale),
               Value("voltage", "Voltage", "state", "batteryState.batteryVoltage", "V", "number", 1.0,
-                    Rule(warn_below=b.num("min_voltage"), hysteresis=0.2), bstale))
+                    Rule(warn_below=b.num("min_voltage"), hysteresis=0.2), bstale, optional=True))
     return RobotMap(name=name, values=values, diagnostics_topic=None, stale_after=after, link=link)
 
 
@@ -693,7 +698,7 @@ def _settings(data: dict, env: dict, problems: list[str]) -> Settings:
     site = _Reader(data.get("site"), "site", problems, {"name", "map", "graph"})
     control = _Reader(data.get("control"), "control", problems, {"enabled", "session_hours"})
     vda = _Reader(data.get("vda"), "vda", problems, {"broker", "interface"})
-    b = _Reader(vda.data.get("broker"), "vda.broker", problems, {"bundled", "url", "bind", "port", "tls_cert", "tls_key"})
+    b = _Reader(vda.data.get("broker"), "vda.broker", problems, {"bundled", "url", "bind", "port", "tls_cert", "tls_key", "username", "password_env"})
     url = b.str("url")
     if b.has("bundled") and b.bool("bundled", True) and url:
         problems.append("vda.broker: use either bundled: true or url, not both")
@@ -706,9 +711,10 @@ def _settings(data: dict, env: dict, problems: list[str]) -> Settings:
     enabled = control.bool("enabled", False) or (env.get("STYRI_CONTROL") or "").strip().lower() in ("1", "true", "yes")
     return Settings(site_name=site.str("name"), map=site.str("map"), graph=site.str("graph"), control=enabled,
                     session_hours=control.num("session_hours", Settings.session_hours, positive=True),
-                    interface=vda.str("interface", Settings.interface),
+                    interface=vda.str("interface", Settings.interface), vda_used="vda" in data,
                     broker=Broker(url=url, bind=b.str("bind"), port=int(b.num("port", Broker.port, positive=True)),
-                                  tls_cert=b.str("tls_cert"), tls_key=b.str("tls_key")))
+                                  tls_cert=b.str("tls_cert"), tls_key=b.str("tls_key"),
+                                  username=b.str("username"), password_env=b.str("password_env")))
 
 
 def from_env(env: dict | None = None) -> RobotMap:

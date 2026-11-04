@@ -23,6 +23,24 @@ async def _main(fake: bool, config_file: str | None = None) -> None:
     server = BridgeServer(cfg, audit)
     loaded = extensions.load(server)
     server.build_robots()
+    settings = cfg.mapping.settings
+
+    # VDA 5050: only for a file that asks for it, so a plain install stays as it was.
+    vda = None
+    tasks = []
+    if settings.vda_used or any(r.map.link.protocol == "vda5050" for r in server.robots):
+        from .vda.broker import BundledBroker
+        from .vda.client import VdaClient
+        vda = VdaClient(server.robots, settings, server.activity, server.site.graph, control=settings.control)
+        server.vda = vda
+        if not settings.broker.url:
+            tasks.append(asyncio.create_task(
+                BundledBroker(settings.broker, settings.interface, [r.map for r in server.robots], server.activity).run()))
+        tasks.append(asyncio.create_task(vda.run()))
+    if settings.control:
+        from .control.service import Control
+        Control(server, vda=vda).attach()
+        logger.warning("Control is ON: a logged-in admin can command robots")
 
     loop = asyncio.get_running_loop()
     stop = loop.create_future()
@@ -30,7 +48,6 @@ async def _main(fake: bool, config_file: str | None = None) -> None:
         loop.add_signal_handler(sig, lambda: stop.done() or stop.set_result(None))
 
     runtimes = []
-    tasks = []
     if fake:
         from .fake import FakeRobot
         tasks.append(asyncio.create_task(FakeRobot(server.monitor).run()))

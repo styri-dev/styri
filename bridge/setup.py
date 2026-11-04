@@ -6,19 +6,21 @@ package_name = "styri_bridge"
 
 setup(
     name=package_name,
-    version="0.3.1",
-    packages=[package_name],
+    version="2.0.0",
+    packages=[package_name, f"{package_name}.control", f"{package_name}.vda"],
+    package_data={f"{package_name}.vda": ["schemas/*"]},
     data_files=[
         ("share/ament_index/resource_index/packages", [f"resource/{package_name}"]),
         (f"share/{package_name}", ["package.xml"]),
     ],
     # rclpy and ROS message packages come from the ROS 2 distro, not PyPI.
-    install_requires=["websockets>=13,<18", "PyYAML>=5.4"],
+    # aiomqtt and jsonschema are only imported for VDA 5050 robots.
+    install_requires=["websockets>=13,<18", "PyYAML>=5.4", "aiomqtt>=2.3,<3", "jsonschema>=4.18,<5"],
     extras_require={"test": ["pytest>=8"]},
     zip_safe=True,
     maintainer="Styri",
     maintainer_email="hello@styri.dev",
-    description="Styri Core: an offline ROS 2 web dashboard and read-only operator panel.",
+    description="Styri Core: offline control of mixed ROS 2 and VDA 5050 fleets from one panel.",
     license="Apache-2.0",
     entry_points={"console_scripts": ["styri = styri_bridge.__main__:main",
                                       "styri-bridge = styri_bridge.__main__:main"]},

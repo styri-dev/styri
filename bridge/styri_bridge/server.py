@@ -29,6 +29,7 @@ from .audit import Activity, AuditLog
 from .config import Config
 from .model import RobotView
 from .monitor import Monitor
+from .sitemap import GraphError, Site
 from .static import StaticFiles
 
 logger = logging.getLogger("styri_bridge")
@@ -118,13 +119,17 @@ class BridgeServer:
         self.robot_limit = CORE_ROBOTS
         self.not_shown: list[dict] = []
         self._built = False
+        settings = cfg.mapping.settings
+        self.site = Site(settings.map, settings.graph)
+        self.vda = None  # the VDA 5050 client, when there are such robots
         self.clients: set[ServerConnection] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._snapshots: dict[int, dict] = {}
         # Extension points (see extensions.py). Empty in Styri Core.
         self.actions: dict[str, Action] = {}
-        self.routes: dict[str, Route] = {}
+        self.routes: dict[str, Route] = {"/site/map": self._site_image}
         self.hello_extra: dict = {}
+        self.hello_session: list[Callable[[Session], dict]] = []
         self.on_connect: list[Callable[[Session], None]] = []
         self.on_disconnect: list[Callable[[Session], None]] = []
         self.on_ros_node: list[Callable[[RobotView, object], None]] = []  # before the node spins
@@ -160,6 +165,8 @@ class BridgeServer:
             if not self.static.available():
                 logger.warning("No UI build at %s; only the WebSocket is served", self.cfg.ui_dir)
             self.activity.add("state", f"styri v{__version__} started", "styri-bridge")
+            for problem in self.site.problems:
+                self.activity.add("warning", problem, "configuration")
             if self.cfg.mapping.error:
                 logger.error("Configuration %s not used: %s", self.cfg.mapping.source, self.cfg.mapping.error)
                 self.activity.add("warning", f"Configuration file not used: {self.cfg.mapping.error}",
@@ -257,6 +264,21 @@ class BridgeServer:
 
     # ---- HTTP -----------------------------------------------------------
 
+    def _site_image(self, connection: ServerConnection, request: Request) -> Response:
+        try:
+            image = self.site.image()
+        except (OSError, GraphError) as exc:
+            logger.warning("Site map: %s", exc)
+            image = None
+        if image is None:
+            return connection.respond(HTTPStatus.NOT_FOUND, "no site map\n")
+        response = connection.respond(HTTPStatus.OK, "")
+        del response.headers["Content-Type"]
+        del response.headers["Content-Length"]
+        response.headers["Content-Type"] = image[1]
+        response.headers["Content-Length"] = str(len(image[0]))
+        return response._replace(body=image[0])
+
     def _process_request(self, connection: ServerConnection, request: Request) -> Response | None:
         path = urlsplit(request.path).path
         if path == "/healthz":
@@ -277,11 +299,13 @@ class BridgeServer:
         session = Session(ws, client=peer_ip(ws))
         hello = {"type": "hello", "api": 2, "version": __version__, "robot": self.cfg.robot_name,
                  "domain": self.domain, "stale_after": self.cfg.stale_after, "controls": False,
-                 "not_shown": self.not_shown,
+                 "not_shown": self.not_shown, "site": self.site.describe(),
                  "min_voltage": self.cfg.min_voltage, "config": self.config_summary(),
                  "robots": [{"index": r.index, "name": r.name, "domain": r.domain, "protocol": r.map.link.protocol,
                              "namespace": r.monitor.robot.namespace or None} for r in self.robots],
                  **self.hello_extra}
+        for hook in self.hello_session:
+            hello.update(hook(session))
         await ws.send(json.dumps(hello))
         await ws.send(json.dumps({"type": "activity", "events": self.activity.recent()}))
         for snap in list(self._snapshots.values()):

@@ -196,7 +196,8 @@ class Monitor:
                     if v.labels and raw is not None:
                         value = dict(v.labels).get(str(value).strip().lower(), value)
                 except (LookupError, TypeError, ValueError) as exc:
-                    self.errors[v.key] = str(exc)
+                    if not v.optional:
+                        self.errors[v.key] = str(exc)
                     continue
                 self.errors.pop(v.key, None)
                 self.readings[v.key] = Reading(value, now, name)
@@ -372,7 +373,8 @@ class Monitor:
     def _mapping_rows(self, now: float, tiles: dict[str, dict]) -> list[dict]:
         """Each mapping and whether it's working, for the banner and the Configuration view."""
         seen = sorted(self.topics)
-        entries = [(v.key, v.label, v.topic, v.describe(), v) for v in self.robot.values]
+        entries = [(v.key, v.label, v.topic, v.describe(), v) for v in self.robot.values
+                   if not v.optional or tiles[v.key]["age"] is not None]
         if self.robot.diagnostics_topic:
             entries.append(("diagnostics", "Diagnostics", self.robot.diagnostics_topic,
                             f"{self.robot.diagnostics_topic} · status levels", None))

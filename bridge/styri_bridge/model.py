@@ -14,6 +14,7 @@ from typing import Any
 
 from .mapping import RobotMap
 from .monitor import Monitor
+from .sitemap import to_site
 
 VERDICTS = {"ok": "OK", "warn": "WARNING", "fault": "FAULT", "unknown": "NO DATA"}
 # action_msgs/GoalStatus: accepted, executing and canceling count as active.
@@ -92,7 +93,7 @@ def describe(view: RobotView, snap: dict) -> dict:
         "verdict": VERDICTS[snap["health"]["level"]], "reason": snap["health"]["line"],
         "battery": tile("battery"), "voltage": tile("voltage"), "errors": live.errors, "warnings": live.warnings,
         "last_seen": None if age is None else round(time.time() - age, 1), "stale": is_stale(view, snap),
-        "pose": live.pose, "velocity": live.velocity, "driving": live.driving, "paused": live.paused,
+        "pose": to_site(live.pose, robot.link.map_offset), "velocity": live.velocity, "driving": live.driving, "paused": live.paused,
         "task": {"id": live.task_id, "state": live.task_state, "last_node": live.last_node, "route": live.route},
         "capabilities": capabilities(robot, live), "points": [p[0] for p in robot.link.points],
         "vehicle_stop": live.vehicle_stop, "factsheet": live.factsheet,
