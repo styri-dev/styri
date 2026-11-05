@@ -44,6 +44,9 @@ functions in place.
   within 500 ms. The bridge holds that watchdog, not the browser.
 - One driver per robot at a time.
 - A robot whose data is STALE can't be driven or sent anywhere.
+- After an Operator stop, the robot's page says so until it reports standing still.
+  If it doesn't within 15 seconds on VDA 5050, or 2 on ROS 2 with `odom` set, the robot
+  shows FAULT, "Operator stop not confirmed". A ROS 2 robot without `odom` can't confirm.
 - Every command and refusal goes in a local append-only log.
 
 ## On your network

@@ -77,6 +77,7 @@ export interface RobotModel {
   limits: { max_linear: number; max_angular: number };
   points: string[];
   vehicle_stop: boolean;
+  stop: "stopping" | "unconfirmed" | null; // Operator stop, until the robot stands still
   factsheet: Record<string, any> | null;
 }
 

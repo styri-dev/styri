@@ -79,14 +79,19 @@ class RosSink:
         """Cancel active goals, then zero velocity at 10 Hz for 2 s."""
         if self._cancel is not None:
             self._cancel.call_async(self._CancelGoal.Request())
+        if view.live.driving:  # known from odom; without it, there's nothing to confirm with
+            view.live.stop = "stopping"
         if self._vel is not None:
             self.velocity(0.0, 0.0)
-            asyncio.get_running_loop().create_task(self._hold_zero())
+            asyncio.get_running_loop().create_task(self._hold_zero(view))
 
-    async def _hold_zero(self) -> None:
+    async def _hold_zero(self, view) -> None:
         for _ in range(int(STOP_RATE * STOP_SECONDS) - 1):
             await asyncio.sleep(1 / STOP_RATE)
             self.velocity(0.0, 0.0)
+        if view.live.stop == "stopping":  # odom clears it the moment the robot stands still
+            view.live.stop = "unconfirmed"
+            view.monitor.activity.add("warning", "Operator stop not confirmed: the robot still reports driving", "control")
 
 
 class LogSink:

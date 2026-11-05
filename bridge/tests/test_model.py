@@ -182,3 +182,20 @@ def test_pose_tf_in_the_file_taps_both_topics():
     cfg = Config(audit_db=":memory:", ui_dir=None, mapping=mapping.Loaded(tuple(robots), "test"))
     server = BridgeServer(cfg, AuditLog(":memory:"))
     assert {"/a/tf", "/a/tf_static"} <= set(server.robots[0].monitor.taps)
+
+
+def test_a_ros_stop_is_confirmed_by_odom():
+    live = model.Live(driving=True, stop="stopping")
+    moving = NS(twist=NS(twist=NS(linear=NS(x=0.3), angular=NS(z=0))))
+    still = NS(twist=NS(twist=NS(linear=NS(x=0.0), angular=NS(z=0))))
+    model.ros_odom(live, moving)
+    assert live.stop == "stopping"
+    model.ros_odom(live, still)
+    assert live.stop is None
+
+
+def test_the_verdict_on_every_screen_comes_from_the_same_place():
+    server = BridgeServer(four_robots(), AuditLog(":memory:"))
+    server.robots[0].live.online = False
+    assert server.snapshot(0)["health"]["level"] == "unknown"
+    assert server.fleet()["robots"][0]["verdict"] == "NO DATA"

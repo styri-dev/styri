@@ -266,6 +266,51 @@ def test_operator_stop_retries_until_stopped_and_never_unpauses(monkeypatch):
     assert all(a["actionType"] != "stopPause" for m in sent(c, "instantActions") for a in m["actions"])
 
 
+def health(view):
+    from styri_bridge.model import overlay_health
+    snap = view.monitor.evaluate()
+    overlay_health(view, snap)
+    return snap["health"]
+
+
+def test_a_stop_that_is_not_confirmed_is_a_fault_until_the_robot_stands_still(monkeypatch):
+    monkeypatch.setattr("styri_bridge.vda.client.STOP_RETRY", 0.01)
+    monkeypatch.setattr("styri_bridge.vda.client.STOP_GIVE_UP", 0.05)
+
+    async def go():
+        c, view = client()
+        feed(c, "state", state(driving=True, orderId="o1"))
+        await c.operator_stop(view)
+        assert view.live.stop == "stopping"
+        assert health(view) == {"level": "warn", "line": "Operator stop sent. Waiting for this robot to stop."}
+        await asyncio.sleep(0.15)
+        assert view.live.stop == "unconfirmed"
+        assert health(view) == {"level": "fault", "line": "Operator stop not confirmed: this robot still reports driving."}
+        feed(c, "state", state(driving=True, orderId="o1"))
+        assert view.live.stop == "unconfirmed"  # still driving: it stays
+        feed(c, "state", state(driving=False, orderId="o1"))
+        assert view.live.stop is None and health(view)["level"] == "ok"
+    asyncio.run(go())
+
+
+def test_a_stop_on_a_standing_robot_has_nothing_to_confirm():
+    async def go():
+        c, view = client()
+        feed(c, "state", state(driving=False))
+        await c.operator_stop(view)
+        assert view.live.stop is None
+    asyncio.run(go())
+
+
+def test_an_offline_robot_never_says_ok():
+    c, view = client()
+    feed(c, "connection", {**header(), "connectionState": "ONLINE"})
+    feed(c, "state", state())
+    assert health(view)["level"] == "ok"
+    feed(c, "connection", {**header(1), "connectionState": "OFFLINE"})
+    assert health(view) == {"level": "unknown", "line": "This robot is offline."}
+
+
 def test_a_held_cancel_is_shown_and_a_cancelled_order_is_idle():
     c, view = client()
     feed(c, "state", state(orderId="o1", nodeStates=[{"nodeId": "b", "sequenceId": 2, "released": True}]))

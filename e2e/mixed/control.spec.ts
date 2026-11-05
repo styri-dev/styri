@@ -1,6 +1,13 @@
 import { expect, type Page, test } from "@playwright/test";
 
+import { execSync, spawn } from "node:child_process";
+import { createReadStream } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { clean } from "./clean";
+
+const DEMO = `${dirname(fileURLToPath(import.meta.url))}/../../examples/mixed-fleet`;
+const FAKE = `${DEMO}/../../e2e/mixed-fleet/fake_vehicle.py`;
 
 const PASSWORD = process.env.STYRI_ADMIN_PASSWORD ?? "styri-demo";
 
@@ -100,6 +107,33 @@ test("the demo's map editor saves out of the box", async ({ page }) => {
   await expect(page.getByTestId("graph-error")).toHaveCount(0);
   await page.reload();
   await expect(page.locator("[data-node]")).toHaveCount(before + 1);
+});
+
+test("an offline robot says NO DATA on every screen, never OK", async ({ page }) => {
+  execSync("docker compose stop -t 1 agv-08", { cwd: DEMO, stdio: "ignore" });
+  await page.goto("/#fleet");
+  const tile = page.locator('button[data-robot="agv-08"]');
+  await expect(tile).toHaveAttribute("data-health", "unknown", { timeout: 15_000 });
+  await expect(tile).toContainText("NO DATA");
+  await expect(tile).toContainText("This robot is offline.");
+  await tile.click();
+  await expect(page.locator(".hero")).toHaveAttribute("data-health", "unknown");
+});
+
+test("a robot that won't stop: FAULT and a clear warning, on its own page, with no login", async ({ page }) => {
+  execSync("docker compose stop -t 1 agv-07", { cwd: DEMO, stdio: "ignore" });
+  const fake = spawn("docker", ["compose", "exec", "-T", "styri", "/ros_entrypoint.sh", "python3", "-"],
+    { cwd: DEMO, stdio: ["pipe", "ignore", "ignore"] });
+  createReadStream(FAKE).pipe(fake.stdin);
+  await page.goto("/#fleet");
+  await expect(page.getByTestId("task-state").nth(1)).toHaveText("active", { timeout: 10_000 });
+  await page.locator('button[data-robot="agv-07"]').click();
+  await page.getByTestId("operator-stop").click();
+  await expect(page.getByTestId("stop-status")).toContainText("Operator stop sent");
+  await expect(page.getByTestId("stop-status")).toContainText("not confirmed", { timeout: 20_000 });
+  await expect(page.locator(".hero")).toHaveAttribute("data-health", "fault");
+  await expect(page.locator(".hero")).toContainText("Operator stop not confirmed");
+  fake.kill();
 });
 
 test("Stop all: a tap does nothing, a one-second hold stops the fleet", async ({ page }) => {

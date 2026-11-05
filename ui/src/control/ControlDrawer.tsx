@@ -121,11 +121,19 @@ export function ControlDrawer({ ctx, robot, onLogin }: { ctx: PanelContext; robo
       <span className="small strong center">{SOFTWARE_STOP}</span>
     </div>
   );
+  const stopStatus = robot.stop && (
+    <p className={`stopstatus stopstatus--${robot.stop}`} role="alert" data-testid="stop-status">
+      {robot.stop === "unconfirmed"
+        ? "Operator stop not confirmed: this robot still reports driving. Check it now, and use its own stop if it's moving."
+        : "Operator stop sent. Waiting for this robot to stop."}
+    </p>
+  );
   if (!control.logged_in) {
     // Stopping needs no login, unless the site says so. Undoing one always does.
     return (
       <section className="drawer drawer--locked" data-testid="control-drawer">
         <div className="drawer__main">
+          {stopStatus}
           <button type="button" className="btn btn--solid" onClick={onLogin}>Log in to control robots</button>
         </div>
         {!control.stop_requires_login && stopButton}
@@ -138,6 +146,7 @@ export function ControlDrawer({ ctx, robot, onLogin }: { ctx: PanelContext; robo
   return (
     <section className="drawer" data-testid="control-drawer" aria-label={`Control ${robot.name}`}>
       <div className="drawer__main">
+        {stopStatus}
         {stale && <p className="warn-fg strong small" role="alert">Data is STALE: driving and waypoints are off. Operator stop stays available.</p>}
         {robot.warnings.map((w) => <p key={w} className="warn-fg small" role="status">{w}</p>)}
         {notice && <p className="warn-fg small" role="alert" data-testid="notice">{notice.text}</p>}

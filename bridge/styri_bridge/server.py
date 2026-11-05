@@ -241,6 +241,7 @@ class BridgeServer:
     def snapshot(self, index: int = 0) -> dict:
         r = self.robots[index]
         snap = r.monitor.evaluate()
+        model.overlay_health(r, snap)
         snap.update(type="snapshot", robot=r.name, domain=r.domain, robot_index=r.index)
         self._snapshots[index] = snap
         return snap

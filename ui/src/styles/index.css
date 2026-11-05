@@ -358,6 +358,13 @@ button { font: inherit; }
 .detail { padding-top: 0; }
 .drawer { display: flex; flex-wrap: wrap; gap: var(--sp-5); padding: var(--sp-5); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-3); }
 .drawer--locked { align-items: center; }
+.stopstatus { margin: 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-2); font-weight: 700; }
+.stopstatus--stopping { background: var(--caution-500); color: var(--g-950); }
+.stopstatus--unconfirmed { background: var(--stop-500); color: var(--white); }
+.ftile__facts dd[data-testid="last-seen"] { white-space: normal; }
+.ftile__word { white-space: nowrap; }
+.ftile--unknown .ftile__word { font-size: var(--fs-lg); }
+.ftile__name { flex-shrink: 0; }
 .drawer__main { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
 .drawer__row { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .drawer__stop { flex: 0 1 240px; margin-left: auto; display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-2); padding-left: var(--sp-5); border-left: 1px solid var(--line); }

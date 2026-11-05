@@ -219,6 +219,10 @@ class VdaClient:
         if velocity:
             live.velocity = {"linear": velocity.get("vx", 0.0), "angular": velocity.get("omega", 0.0)}
         live.driving, live.paused = msg.get("driving"), bool(msg.get("paused"))
+        if live.driving is False and live.stop is not None:
+            if live.stop == "unconfirmed":
+                monitor.activity.add("state", "Stopped: the robot no longer reports driving", "vda")
+            live.stop = None
         live.last_node = msg.get("lastNodeId") or None
         live.route = [n["nodeId"] for n in msg.get("nodeStates", ())]
         errors = [e for e in msg.get("errors", ()) if e.get("errorType") not in NOT_A_FAULT]
@@ -344,6 +348,8 @@ class VdaClient:
         if not types:
             raise VdaError("neither startPause nor cancelOrder is in this robot's instant_actions")
         sent = await self.send(v, "instantActions", orders.instant(*types))
+        if view.live.driving is not False:
+            view.live.stop = "stopping"
         if time.monotonic() > v.stop_until:
             v.stop_until = time.monotonic() + STOP_GIVE_UP
             asyncio.get_running_loop().create_task(self._until_stopped(v, types))
@@ -358,4 +364,5 @@ class VdaClient:
                 await self.send(v, "instantActions", orders.instant(*types))
             except VdaError as exc:
                 logger.warning("Operator stop retry for %s: %s", v.view.name, exc)
+        v.view.live.stop = "unconfirmed"
         v.view.monitor.activity.add("warning", "Operator stop not confirmed: the robot still reports driving", "vda")

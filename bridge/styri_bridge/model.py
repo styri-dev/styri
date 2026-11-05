@@ -37,6 +37,7 @@ class Live:
     online: bool | None = None    # None: this protocol doesn't say
     factsheet: dict | None = None
     vehicle_stop: bool = False    # the vehicle reports its own safety stop is active
+    stop: str | None = None       # Operator stop: "stopping", "unconfirmed", or None
 
 
 @dataclass
@@ -76,6 +77,18 @@ def capabilities(robot: RobotMap, live: Live) -> dict:
             "can_stop": bool({"startPause", "cancelOrder"} & set(link.instant_actions))}
 
 
+def overlay_health(view: RobotView, snap: dict) -> None:
+    """What the protocol knows and the tiles can't: a tile can't tell that a robot went offline, or
+    that a stop didn't take. It goes in the snapshot, so every screen says the same thing."""
+    live = view.live
+    if live.stop == "unconfirmed":
+        snap["health"] = {"level": "fault", "line": "Operator stop not confirmed: this robot still reports driving."}
+    elif live.stop == "stopping":
+        snap["health"] = {"level": "warn", "line": "Operator stop sent. Waiting for this robot to stop."}
+    elif live.online is False:
+        snap["health"] = {"level": "unknown", "line": "This robot is offline."}
+
+
 def is_stale(view: RobotView, snap: dict) -> bool:
     if view.live.online is False:
         return True
@@ -98,7 +111,7 @@ def describe(view: RobotView, snap: dict) -> dict:
                  "last_node": live.last_node, "route": live.route},
         "capabilities": capabilities(robot, live),
         "limits": {"max_linear": robot.link.max_linear, "max_angular": robot.link.max_angular}, "points": [p[0] for p in robot.link.points],
-        "vehicle_stop": live.vehicle_stop, "factsheet": live.factsheet,
+        "vehicle_stop": live.vehicle_stop, "factsheet": live.factsheet, "stop": live.stop,
     }
 
 
@@ -151,6 +164,8 @@ def ros_odom(live: Live, msg: Any) -> None:
     linear, angular = msg.twist.twist.linear.x, msg.twist.twist.angular.z
     live.velocity = {"linear": linear, "angular": angular}
     live.driving = abs(linear) > 0.01 or abs(angular) > 0.01
+    if not live.driving:
+        live.stop = None
 
 
 def nav2_status(live: Live, msg: Any) -> None:
