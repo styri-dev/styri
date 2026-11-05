@@ -46,15 +46,16 @@ async function tapOn(locator, hold = 0) {
 }
 // A point on the site map, by its offset in metres from a graph node.
 const onMap = (node, dx = 0, dy = 0) => page.evaluate(([id, ox, oy]) => {
-  const svg = document.querySelector('[data-testid="site-map"]');
-  const label = [...svg.querySelectorAll("text")].find((t) => t.textContent === id);
-  const circle = label.parentElement.querySelector("circle");
-  const p = new DOMPoint(+circle.getAttribute("cx") + ox, +circle.getAttribute("cy") - oy).matrixTransform(svg.getScreenCTM());
-  return [p.x, p.y];
+  const bar = document.querySelector(".mapscale");
+  const perMetre = bar.querySelector(".mapscale__bar").offsetWidth / parseFloat(bar.textContent);
+  const box = document.querySelector(`[data-node="${id}"] circle`).getBoundingClientRect();
+  return [box.x + box.width / 2 + ox * perMetre, box.y + box.height / 2 - oy * perMetre];
 }, [node, dx, dy]);
 async function sendTo(robot, node, dx = 0, dy = 0) {
-  await tapOn(page.locator(`g[data-robot="${robot}"]`));
+  await tapOn(page.locator(`[data-pick="${robot}"]`)); // by the fleet list: a moving marker is a moving target
   await wait(0.8);
+  await tapOn(page.getByRole("button", { name: "Send to…" }).first());
+  await wait(0.6);
   await tap(...(await onMap(node, dx, dy)));
   await wait(1);
   await tapOn(page.getByTestId("send-goal"));
@@ -62,7 +63,7 @@ async function sendTo(robot, node, dx = 0, dy = 0) {
 }
 
 await page.goto("http://localhost:8080/#fleet");
-await page.locator('button[data-robot="agv-08"]').waitFor();
+await page.locator('.ftile[data-robot="agv-08"]').waitFor();
 await wait(3); // every tile fresh
 await pointer();
 await cdp.send("Page.startScreencast", { format: "jpeg", quality: 85, maxWidth: W, maxHeight: H, everyNthFrame: 1 });
@@ -70,11 +71,12 @@ await cdp.send("Page.startScreencast", { format: "jpeg", quality: 85, maxWidth: 
 await wait(5); // one panel: a ROS 2 robot and two VDA 5050 vehicles
 await tapOn(page.getByRole("link", { name: "Map" }));
 await wait(3);
-await tapOn(page.getByTestId("login-toggle"));
+await tapOn(page.getByTestId("log-in"));
 await wait(0.6);
+await page.getByLabel("Username").pressSequentially("admin", { delay: 60 });
 await page.getByLabel("Password").pressSequentially(PASSWORD, { delay: 60 });
 await page.keyboard.press("Enter");
-await page.getByTestId("login-toggle").filter({ hasText: "Log out" }).waitFor();
+await page.getByTestId("user-menu").waitFor();
 await wait(1.5);
 
 await sendTo("amr-01", "n3", -0.3, -0.3); // Nav2 plans around the obstacles
@@ -82,25 +84,25 @@ await sendTo("agv-07", "n3");             // VDA 5050: snaps to the node, order 
 await sendTo("agv-08", "n6");
 await wait(2);
 
-// By the header's switcher: a moving marker is a moving target.
-await page.locator(".switcher__select").selectOption({ label: "agv-07" });
+await tapOn(page.locator('[data-pick="agv-07"]'));
 await wait(1);
 await tapOn(page.getByRole("button", { name: "Pause", exact: true }));
 await wait(3);
 await tapOn(page.getByRole("button", { name: "Resume", exact: true }));
 await wait(1);
-await page.evaluate(() => scrollTo({ top: 0, behavior: "smooth" }));
 await wait(3);
 
 await tapOn(page.getByTestId("stop-all"), 1.2); // press and hold
 await wait(4);
 await tapOn(page.getByRole("link", { name: "Fleet" }));
 await wait(4);
-await tapOn(page.locator('button[data-robot="agv-07"]'));
+await tapOn(page.locator('.ftile[data-robot="agv-07"]'));
+await wait(1.5);
+await tapOn(page.getByRole("button", { name: "Details" }).first());
 await wait(1.5);
 await page.getByTestId("factsheet").scrollIntoViewIfNeeded();
 await wait(4);
-await tapOn(page.getByRole("link", { name: /Activity/ }));
+await tapOn(page.getByRole("link", { name: "Activity" }));
 await wait(5);
 
 await cdp.send("Page.stopScreencast");

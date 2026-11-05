@@ -6,17 +6,22 @@ import { expect, test, type Page } from "@playwright/test";
 // Without E2E_CONFIG (the default run) it checks the no-file behaviour.
 const MODE = process.env.E2E_CONFIG ?? "none";
 
-const tile = (page: Page, label: string) => page.locator(`.tile[data-label="${label}"]`);
+const tile = (page: Page, label: string) => page.locator(`.vital[data-label="${label}"]`);
+const configuration = async (page: Page) => {
+  await page.getByTestId("user-menu").click();
+  await page.getByRole("menuitem", { name: "Configuration" }).click();
+};
 const row = (page: Page, key: string) => page.locator(`.crow[data-mapping="${key}"]`);
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".hero")).toBeVisible();
+  await page.locator(".ftile").first().click();
+  await expect(page.getByTestId("verdict")).toBeVisible();
 });
 
 test("no file: environment defaults, shown as such", async ({ page }) => {
   test.skip(MODE !== "none", "runs without a mapping file");
-  await page.locator(".tab[href=\"#configuration\"]").click();
+  await configuration(page);
   await expect(page.getByTestId("config-source")).toHaveText("Environment variables (no styri.yaml)");
   await expect(row(page, "battery")).toHaveAttribute("data-status", "ok");
   await expect(row(page, "cpu_temp")).toContainText("/diagnostics");
@@ -29,10 +34,10 @@ test("preset: status and custom field tiles, every mapping OK", async ({ page })
   await expect(tile(page, "SPEED")).toContainText("m/s");
   await expect(tile(page, "BATTERY TEMPERATURE")).toContainText("°C");
   await expect(tile(page, "BATTERY PRESENT")).toContainText("true");
-  await expect(tile(page, "CPU TEMP")).toContainText("/diagnostics"); // the robot's figure, not the host's
+  await expect(tile(page, "CPU TEMP")).toHaveAttribute("title", /\/diagnostics/); // the robot's figure, not the host's
   await expect(page.getByTestId("mapping-banner")).toHaveCount(0);
 
-  await page.locator(".tab[href=\"#configuration\"]").click();
+  await configuration(page);
   await expect(page.getByTestId("config-source")).toHaveText("/opt/styri/presets/styri-sim.yaml");
   await expect(page.locator(".crow")).toHaveCount(8);
   await expect(page.locator('.crow:not([data-status="ok"])')).toHaveCount(0, { timeout: 10_000 });
@@ -46,12 +51,12 @@ test("broken file: the banner and Configuration say what's wrong", async ({ page
   await expect(banner).toContainText("no field “linear”");
   await expect(tile(page, "BATTERY")).toContainText("%"); // what is mapped right still works
 
-  await page.locator(".tab[href=\"#configuration\"]").click();
+  await configuration(page);
   await expect(row(page, "status")).toHaveAttribute("data-status", "missing");
   await expect(row(page, "status")).toContainText("Close matches: /robot_status");
   await expect(row(page, "field1")).toHaveAttribute("data-status", "error");
   await expect(row(page, "battery")).toHaveAttribute("data-status", "ok");
 
-  await page.getByRole("link", { name: "Activity log" }).click();
+  await page.getByRole("link", { name: "Activity" }).click();
   await expect(page.locator(".main")).toContainText("Mapped topic /robot_state not found. Did you mean /robot_status?");
 });

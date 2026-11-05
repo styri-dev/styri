@@ -2,8 +2,16 @@ import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 import { fault, pose } from "./sim";
 
-const hero = (page: Page) => page.locator(".hero");
-const tile = (page: Page, label: string) => page.locator(`.tile[data-label="${label}"]`);
+const hero = (page: Page) => page.getByTestId("verdict");
+const tile = (page: Page, label: string) => page.locator(`.vital[data-label="${label}"]`);
+const value = (page: Page, label: string) => tile(page, label).locator(".vital__value");
+
+/** The one robot's page: it opens from the Fleet tile, as there's no map here. */
+async function detail(page: Page) {
+  await page.goto("/#fleet");
+  await page.locator(".ftile").first().click();
+  await expect(hero(page)).toBeVisible();
+}
 
 test.describe.configure({ mode: "serial" });
 
@@ -15,47 +23,48 @@ test.beforeAll(() => {
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator(".field__conn")).toContainText("Connected");
+  await expect(page.locator(".ftile").first()).toBeVisible();
+  await expect(page.getByTestId("conn").first()).not.toContainText("Reconnecting");
 });
 
-test("overview shows live data from the robot", async ({ page }) => {
+test("the robot page shows live data from the robot", async ({ page }) => {
+  await detail(page);
   await expect(hero(page)).toHaveAttribute("data-health", "ok");
-  await expect(hero(page)).toContainText("All systems normal.");
-  await expect(tile(page, "BATTERY").locator(".tile__number")).toHaveText(/^\d+$/);
-  await expect(tile(page, "VOLTAGE").locator(".tile__number")).toHaveText(/^2\d\.\d\d$/);
-  await expect(tile(page, "CPU TEMP")).toContainText("/diagnostics");
-  await expect(tile(page, "CPU TEMP").locator(".tile__number")).toHaveText(/^5\d\.\d$/);
-  await expect(tile(page, "LINK LATENCY").locator(".tile__number")).toHaveText(/^\d+$/);
-  await expect(tile(page, "BATTERY")).toContainText("LIVE");
+  await expect(hero(page).locator(".verdict__reason")).toHaveCount(0); // an OK robot needs no reason
+  await expect(value(page, "BATTERY")).toHaveText(/^\d+ %$/);
+  await expect(value(page, "VOLTAGE")).toHaveText(/^2\d\.\d\d V$/);
+  await expect(tile(page, "CPU TEMP")).toHaveAttribute("title", "/diagnostics");
+  await expect(value(page, "CPU TEMP")).toHaveText(/^5\d °C$/);
 });
 
 test("topics tab lists the graph with rates and the latest message", async ({ page }) => {
-  await page.getByRole("link", { name: /Topics/ }).click();
+  await page.getByRole("link", { name: "Topics" }).click();
   const odom = page.locator('.trow[data-topic="/odom"]');
   await expect(odom).toContainText("nav_msgs/msg/Odometry");
-  await expect.poll(async () => Number(await odom.locator(".num").first().textContent())).toBeGreaterThan(5);
+  await expect.poll(async () => parseFloat((await odom.locator(".num").textContent()) ?? "0")).toBeGreaterThan(5);
   await expect(page.locator('.trow[data-topic="/scan"]')).toBeVisible();
   await odom.click();
   await expect(page.locator(".message")).toContainText("pose:");
-  await expect(page.locator(".topics__detail")).toContainText("nav_msgs/msg/Odometry");
 });
 
 test("low battery raises a warning and logs it", async ({ page }) => {
+  await detail(page);
   fault("battery:18");
   await expect(hero(page)).toHaveAttribute("data-health", "warn");
   await expect(hero(page)).toContainText("Battery low — 18 %. Send to dock soon.");
-  await expect(tile(page, "BATTERY")).toContainText("▲ LOW");
+  await expect(tile(page, "BATTERY")).toContainText("▲ BATTERY");
 
-  await page.getByRole("link", { name: "Activity log" }).click();
-  await expect(page.locator(".lrow[data-kind=warning]").first()).toContainText("Battery below 25 %");
+  await page.getByRole("link", { name: "Activity" }).click();
+  await expect(page.locator(".arow[data-kind=warning]").first()).toContainText("Battery below 25 %");
   await expect(page.getByText("Robot status changed OK → WARNING").first()).toBeVisible();
 
   fault("battery:90");
-  await page.getByRole("link", { name: "Overview" }).click();
+  await detail(page);
   await expect(hero(page)).toHaveAttribute("data-health", "ok");
 });
 
 test("a diagnostics error is a fault", async ({ page }) => {
+  await detail(page);
   fault("motor_fault");
   await expect(hero(page)).toHaveAttribute("data-health", "fault");
   await expect(hero(page)).toContainText("motor_right reports Overcurrent.");
@@ -64,23 +73,24 @@ test("a diagnostics error is a fault", async ({ page }) => {
 });
 
 test("a silent robot goes stale, then recovers", async ({ page }) => {
+  await detail(page);
   fault("silence:8");
-  await expect(tile(page, "BATTERY")).toContainText("STALE");
   await expect(hero(page)).toHaveAttribute("data-health", "unknown");
-  await expect(hero(page)).toContainText("No data from the robot");
+  await expect(hero(page)).toContainText("STALE");
+  await expect(hero(page)).toContainText(/No data for \d+ s/);
   await expect(hero(page)).toHaveAttribute("data-health", "ok", { timeout: 20_000 });
-  await page.getByRole("link", { name: "Activity log" }).click();
+  await page.getByRole("link", { name: "Activity" }).click();
   await expect(page.getByText(/\/battery_state recovered after \d+ s/).first()).toBeVisible();
 });
 
 test("activity log filters and exports CSV", async ({ page }) => {
-  await page.getByRole("link", { name: "Activity log" }).click();
-  await page.getByRole("button", { name: "Warnings" }).click();
-  const kinds = await page.locator(".lrow[data-kind]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-kind")));
+  await page.getByRole("link", { name: "Activity" }).click();
+  await page.getByLabel("Status").selectOption("problems");
+  const kinds = await page.locator(".arow[data-kind]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-kind")));
   expect(kinds.length).toBeGreaterThan(0);
   expect(new Set(kinds)).toEqual(new Set(["warning"]));
 
-  await page.getByRole("button", { name: "All", exact: true }).first().click();
+  await page.getByLabel("Status").selectOption("all");
   const [download] = await Promise.all([
     page.waitForEvent("download"),
     page.getByRole("button", { name: "Export CSV" }).click(),
@@ -92,9 +102,14 @@ test("activity log filters and exports CSV", async ({ page }) => {
 });
 
 test("with control off there are no control buttons", async ({ page }) => {
+  await detail(page);
   await expect(page.getByTestId("stop-all")).toHaveCount(0);
   await expect(page.getByTestId("control-drawer")).toHaveCount(0);
-  await expect(page.getByTestId("login-toggle")).toHaveCount(0);
+  await expect(page.getByTestId("log-in")).toHaveCount(0);
+  await page.getByTestId("user-menu").click();
+  await expect(page.getByRole("menuitem", { name: "Configuration" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Users and settings" })).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: "Log out" })).toHaveCount(0);
 });
 
 test("view-only refuses control commands and the robot stays put", async ({ page }) => {
@@ -128,8 +143,8 @@ test("the panel never requests anything from another origin", async ({ page, bas
     if (url.origin !== new URL(baseURL!).origin && url.protocol !== "data:") foreign.push(req.url());
   });
   await page.goto("/");
-  for (const name of ["Topics", "Activity log", "Overview"]) {
-    await page.getByRole("link", { name: new RegExp(name) }).click();
+  for (const name of ["Topics", "Activity", "Map", "Fleet"]) {
+    await page.getByRole("link", { name }).click();
   }
   await page.waitForTimeout(1500);
   expect(foreign).toEqual([]);
@@ -138,10 +153,11 @@ test("the panel never requests anything from another origin", async ({ page, bas
 test.describe("at 768 px", () => {
   test.use({ viewport: { width: 768, height: 1024 } });
 
-  test("overview tiles lay out 3 + 2", async ({ page }) => {
+  test("the robot page's vitals lay out 3 + 2", async ({ page }) => {
+    await detail(page);
     // "Connected" can come before the first snapshot, and evaluateAll doesn't wait.
-    await expect(page.locator(".tile")).toHaveCount(5);
-    const tops = await page.locator(".tile").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    await expect(page.locator(".vital")).toHaveCount(5);
+    const tops = await page.locator(".vital").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
     expect(tops).toHaveLength(5);
     expect(new Set(tops.slice(0, 3)).size).toBe(1);
     expect(new Set(tops.slice(3)).size).toBe(1);
@@ -153,26 +169,27 @@ test.describe("on a phone (390 px)", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
   test("a warning fits: no sideways scroll, numbers inside their tiles, one-row header", async ({ page }) => {
+    await detail(page);
     fault("battery:18");
-    await expect(page.locator(".hero")).toHaveAttribute("data-health", "warn");
+    await expect(hero(page)).toHaveAttribute("data-health", "warn");
     const m = await page.evaluate(() => ({
       vw: document.documentElement.clientWidth,
       scrollW: document.documentElement.scrollWidth,
-      heroRight: document.querySelector(".hero__word")!.getBoundingClientRect().right,
-      spill: [...document.querySelectorAll(".tile")].filter((t) => {
-        const v = t.querySelector(".tile__value") as HTMLElement;
+      heroRight: document.querySelector(".verdict__word")!.getBoundingClientRect().right,
+      spill: [...document.querySelectorAll(".vital")].filter((t) => {
+        const v = t.querySelector(".vital__value") as HTMLElement;
         return v.scrollWidth > v.clientWidth + 1;
       }).map((t) => (t as HTMLElement).dataset.label),
-      badgeH: (document.querySelector(".badge") as HTMLElement).getBoundingClientRect().height,
       headerH: document.querySelector(".header")!.getBoundingClientRect().height,
       tabsFit: [...document.querySelectorAll(".tab")].every((t) => t.getBoundingClientRect().right <= document.documentElement.clientWidth),
+      tabsAtBottom: document.querySelector(".tabs")!.getBoundingClientRect().bottom >= innerHeight - 1,
     }));
     fault("battery:90");
     expect(m.scrollW).toBe(m.vw);
     expect(m.heroRight).toBeLessThanOrEqual(m.vw);
     expect(m.spill).toEqual([]);
-    expect(m.badgeH).toBeLessThanOrEqual(30); // "▲ LOW" on one line
     expect(m.headerH).toBeLessThanOrEqual(64);
     expect(m.tabsFit).toBe(true);
+    expect(m.tabsAtBottom).toBe(true);
   });
 });

@@ -8,10 +8,11 @@ const PASSWORD = process.env.STYRI_ADMIN_PASSWORD ?? "styri-demo";
 
 async function login(page: Page) {
   await page.goto("/#map");
-  await page.getByTestId("login-toggle").click();
+  await page.getByTestId("log-in").click();
+  await page.getByLabel("Username").fill("admin");
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Log in", exact: true }).last().click();
-  await expect(page.getByTestId("login-toggle")).toHaveText("Log out");
+  await expect(page.getByTestId("user-menu")).toBeVisible();
 }
 
 async function spot(page: Page, fx: number, fy: number): Promise<[number, number]> {
@@ -102,7 +103,19 @@ test("a saved graph takes orders at once: a vehicle drives a route it didn't hav
   }, [graph, PASSWORD] as const);
   expect(replies.map((r) => r.type)).toEqual(["ack", "ack"]);
   await page.goto("/#fleet");
-  await expect(page.locator('button[data-robot="agv-07"]').getByTestId("task-state")).toHaveText("active", { timeout: 10_000 });
+  await expect(page.locator('.ftile[data-robot="agv-07"]')).toHaveAttribute("data-task", "active", { timeout: 10_000 });
+});
+
+test("connecting two nodes again makes the edge one-way, with an arrow", async ({ page }) => {
+  await login(page);
+  await page.getByTestId("edit-graph").click();
+  await page.getByTestId("tool-connect").click();
+  await node(page, "n1").click();
+  await node(page, "n2").click();
+  await node(page, "n1").click();
+  await expect(page.locator('[data-edge][data-directed="true"] path')).toHaveCount(1);
+  await page.getByRole("button", { name: "Discard" }).click();
+  await expect(page.locator('[data-edge][data-directed="true"]')).toHaveCount(0);
 });
 
 test("two editors: the second to save is told to reload, and keeps its draft", async ({ browser }) => {
@@ -118,7 +131,7 @@ test("two editors: the second to save is told to reload, and keeps its draft", a
   await expect(one.getByTestId("edit-graph")).toBeVisible();
   await two.mouse.click(...(await spot(two, 0.8, 0.8)));
   await two.getByTestId("save-graph").click();
-  await expect(two.getByTestId("graph-error")).toHaveText("The graph changed since you opened it. Reload.");
+  await expect(two.getByTestId("graph-error")).toContainText("The graph changed since you opened it. Reload.");
   await expect(two.getByTestId("save-graph")).toBeVisible();
 });
 
