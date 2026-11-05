@@ -60,7 +60,7 @@ function StopAll({ ctx }: { ctx: PanelContext }) {
   const run = stopAllProgress(ctx);
   const label = !run ? "Stop all" : !run.settled ? `Stopping ${run.done}/${run.list.length}`
     : run.unconfirmed ? `${run.unconfirmed} NOT confirmed` : run.done === run.list.length ? "All stopped" : "Stop all";
-  const hint = run ? "" : p > 0 ? "Keep holding" : phone ? "" : "Hold 1 s";
+  const hint = p > 0 ? "Keep holding" : run ? "" : phone ? "" : "Hold 1 s";
   const key = (e: KeyboardEvent) => (e.key === " " || e.key === "Enter") && (e.preventDefault(), true);
   return (
     <button type="button" className={`stopall ${disc ? "is-off" : ""}`} data-testid="stop-all" aria-disabled={disc}
@@ -245,9 +245,18 @@ export function StopAllBanner({ ctx }: { ctx: PanelContext }) {
   if (!run || run.id === dismissed) return null;
   const n = run.list.length;
   const title = !run.settled ? `${run.done} of ${n} confirmed. Robots stay paused after they stop.`
-    : run.done < n ? `${run.done} of ${n} stopped. Not every robot confirmed.`
-    : `All ${n} robots stopped and paused. Resume each one separately.`;
+    : `${run.done} of ${n} stopped. Not every robot confirmed.`;
   const failed = run.list.find(([, s]) => s === "no_reply" || s === "not_confirmed");
+  if (run.settled && run.done === n) {
+    // Done: one slim line. A ROS 2 robot stops without pausing, so say paused only if they all are.
+    const paused = run.list.every(([name]) => ctx.state.fleet.find((r) => r.name === name)?.paused);
+    return (
+      <div className="sabanner sabanner--slim" role="status" data-testid="stop-all-banner">
+        <span className="sabanner__body"><span className="sabanner__sq" />All stopped{paused ? " · robots paused" : ""}</span>
+        <button type="button" className="btn-small" onClick={() => setDismissed(run.id)}>Dismiss</button>
+      </div>
+    );
+  }
   return (
     <div className="sabanner" role="status" data-testid="stop-all-banner">
       <div className="sabanner__head">

@@ -199,6 +199,23 @@ test("a robot that goes silent: No reply, the card turns red, its health stays",
   fake.kill();
 });
 
+test("after Stop all, the banner slims to one line, and only says paused if every robot is", async ({ page }) => {
+  await page.goto("/#fleet");
+  const stop = page.getByTestId("stop-all");
+  await stop.scrollIntoViewIfNeeded();
+  const b = (await stop.boundingBox())!;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(1200);
+  await page.mouse.up();
+  const banner = page.getByTestId("stop-all-banner");
+  await expect(banner).toContainText("All stopped", { timeout: 15_000 });
+  await expect(banner).not.toContainText("robots paused"); // amr-01 is ROS 2: it stops without pausing
+  await expect(banner.locator(".sachip")).toHaveCount(0);
+  await banner.getByRole("button", { name: "Dismiss" }).click();
+  await expect(banner).toHaveCount(0);
+});
+
 test("anonymous viewing off: a stranger gets a login and no robots", async ({ page, browser }) => {
   await page.goto("/");
   await login(page);
@@ -232,6 +249,9 @@ test("Stop all: a tap does nothing, a one-second hold stops the fleet", async ({
   const stops = page.getByText(/Operator stop from/);
   await expect(page.locator(".tab--active")).toContainText("Activity");
   await page.waitForTimeout(1000);
+  // The last Stop all is the bridge's, so a new page sees it until dismissed.
+  const last = page.getByTestId("stop-all-banner");
+  if (await last.isVisible()) await last.getByRole("button", { name: "Dismiss" }).click();
   const before = await stops.count();
   const box = (await page.getByTestId("stop-all").boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -246,8 +266,7 @@ test("Stop all: a tap does nothing, a one-second hold stops the fleet", async ({
   await page.waitForTimeout(1200);
   await page.mouse.up();
   await expect.poll(() => stops.count()).toBeGreaterThan(before);
-  await expect(page.getByTestId("stop-all-banner")).toBeVisible();
-  await expect(page.locator(".sachip")).toHaveCount(3);
+  await expect(page.getByTestId("stop-all-banner")).toContainText("All stopped");
 });
 
 test("at 390 px the joystick is a real touch target and the page doesn't scroll sideways", async ({ page }) => {
