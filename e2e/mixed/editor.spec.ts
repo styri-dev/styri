@@ -111,8 +111,7 @@ test("connecting two nodes again makes the edge one-way, with an arrow", async (
   await page.getByTestId("edit-graph").click();
   await page.getByTestId("tool-connect").click();
   await node(page, "n1").click();
-  await node(page, "n2").click();
-  await node(page, "n1").click();
+  await node(page, "n2").click(); // already joined
   await expect(page.locator('[data-edge][data-directed="true"] path')).toHaveCount(1);
   await page.getByRole("button", { name: "Discard" }).click();
   await expect(page.locator('[data-edge][data-directed="true"]')).toHaveCount(0);

@@ -351,7 +351,7 @@ p { margin: 0; }
 .sitemap__hit { fill: transparent; stroke: transparent; cursor: pointer; }
 .maplabel { position: absolute; display: flex; align-items: center; white-space: nowrap; border-radius: var(--r-1); border: 1px solid transparent; font-family: var(--font-mono); font-size: 12px; pointer-events: none; }
 .marker { position: absolute; width: 56px; height: 56px; margin: -28px 0 0 -28px; padding: 0; border: 0; background: transparent; }
-.marker.is-inert { pointer-events: none; } /* while editing, taps go to the graph */
+.marker.is-inert { pointer-events: none; } /* while editing or sending, taps go to the map */
 .marker__svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .marker__inner { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--g-950); pointer-events: none; }
 .marker__inner--sm { font-size: 10px; }

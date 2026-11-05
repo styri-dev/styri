@@ -161,6 +161,15 @@ export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
   const view = route.view === "users" && !access.admin ? "fleet"
     : route.view === "login" && state.hello && (!access.auth || (access.loggedIn && access.role !== "viewer")) ? from
     : route.view;
+  // Whoever just logged in leaves the login. (A viewer may open it on purpose, to switch to an operator.)
+  const who = useRef(access.name);
+  useEffect(() => {
+    if (access.name && access.name !== who.current && route.view === "login") {
+      history.replaceState(null, "", `#${from}`);
+      setRoute({ view: from });
+    }
+    who.current = access.name;
+  }, [access.name, route.view, from]);
   // Logged in from #login: the address follows, so a reload doesn't land back there.
   useEffect(() => {
     if (route.view === "login" && view !== "login") {

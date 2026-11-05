@@ -97,6 +97,16 @@ test("Send to…, one tap on the map, one Send: a VDA vehicle snaps to a node, a
   await expect(page.locator(".card__tasksum .status")).toContainText(/Running|Done/, { timeout: 10_000 });
 });
 
+test("picking a destination, a tap on a robot is still a tap on the map", async ({ page }) => {
+  await page.goto("/#map");
+  await login(page);
+  await page.locator('button[data-robot="agv-07"]').click();
+  await page.getByRole("button", { name: "Send to…" }).first().click();
+  const box = (await page.locator('button[data-robot="agv-07"]').boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(page.getByTestId("send-goal")).toBeVisible();
+});
+
 test("a paused robot offers Resume, not Send to…, and the bridge refuses one anyway", async ({ page }) => {
   await page.goto("/#map");
   await login(page);

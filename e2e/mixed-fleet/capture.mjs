@@ -78,14 +78,14 @@ await page.getByLabel("Password").pressSequentially(PASSWORD, { delay: 60 });
 await page.keyboard.press("Enter");
 await page.getByTestId("user-menu").waitFor();
 await wait(1.5);
+await tapOn(page.getByTestId("fit-all")); // every node in view
+await wait(1);
 
 await sendTo("amr-01", "n3", -0.3, -0.3); // Nav2 plans around the obstacles
-await sendTo("agv-07", "n3");             // VDA 5050: snaps to the node, order along the graph
-await sendTo("agv-08", "n6");
-await wait(2);
+await sendTo("agv-08", "n6");             // VDA 5050: snaps to the node, order along the graph
+await sendTo("agv-07", "n3");             // last, so it's still on its way
+await wait(0.5);
 
-await tapOn(page.locator('[data-pick="agv-07"]'));
-await wait(1);
 await tapOn(page.getByRole("button", { name: "Pause", exact: true }));
 await wait(3);
 await tapOn(page.getByRole("button", { name: "Resume", exact: true }));
@@ -102,7 +102,7 @@ await tapOn(page.getByRole("button", { name: "Details" }).first());
 await wait(1.5);
 await page.getByTestId("factsheet").scrollIntoViewIfNeeded();
 await wait(4);
-await tapOn(page.getByRole("link", { name: "Activity" }));
+await tapOn(page.getByRole("link", { name: "Activity", exact: true }));
 await wait(5);
 
 await cdp.send("Page.stopScreencast");
