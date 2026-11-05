@@ -315,10 +315,13 @@ class Control:
                 self.teleop.stop_all("control_off")
             self.bridge.activity.add("warning", f"Robot control turned {'on' if self.switches.control else 'off'}", "control")
         for other in list(self.bridge.sessions):
-            if self.bridge.view_gate(other):
-                await self.bridge.open_view(other)
-            elif other.viewing:
-                await self.bridge.close_view(other)
+            try:
+                if self.bridge.view_gate(other):
+                    await self.bridge.open_view(other)
+                elif other.viewing:
+                    await self.bridge.close_view(other)
+            except ConnectionClosed:  # a browser that just left mustn't cost the others their update
+                continue
         if changed:
             self.bridge.publish_threadsafe({"type": "switches", "enabled": self.switches.control,
                                             "anonymous_view": self.switches.anonymous_view})

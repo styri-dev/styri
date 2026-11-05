@@ -8,6 +8,7 @@ import urllib.request
 
 import pytest
 from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed
 
 from helpers import run_bridge
 from styri_bridge import mapping
@@ -818,6 +819,24 @@ def test_a_goal_a_stop_took_over_is_interrupted_not_running_for_ever():
             await ask(ws, action="OPERATOR_STOP", robot="a")
             goal = next(r for r in (await ask(ws, action="AUDIT", robot="a"))["rows"] if r["command"] == "GOAL")
             assert goal["status"] == "interrupted"
+    bridge(go)
+
+
+def test_a_browser_that_just_left_does_not_stop_a_switch():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as admin, connect(url) as gone, connect(url) as wall:
+            await login(admin)
+            await ask(admin, action="SWITCHES", anonymous_view=False)
+            strangers = [s for s in server.sessions if not s.viewing]
+            assert len(strangers) == 2
+            first = strangers[0]
+
+            async def closed(_):
+                raise ConnectionClosed(None, None)
+            first.ws.send = closed
+            reply = await ask(admin, action="SWITCHES", anonymous_view=True)
+            assert reply["type"] != "error"
+            assert strangers[1].viewing
     bridge(go)
 
 

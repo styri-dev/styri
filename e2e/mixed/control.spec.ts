@@ -229,6 +229,7 @@ test("anonymous viewing off: a stranger gets a login and no robots", async ({ pa
       if (m.type === "users") { ws.close(); done(); }
       if (m.type === "error") { ws.close(); fail(new Error(m.error)); }
     };
+    ws.onclose = () => fail(new Error("closed with no reply"));
   }), value);
   await anonymousView(false);
   try {
