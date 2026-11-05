@@ -202,11 +202,18 @@ test("a robot that goes silent: No reply, the card turns red, its health stays",
 test("anonymous viewing off: a stranger gets a login and no robots", async ({ page, browser }) => {
   await page.goto("/");
   await login(page);
-  await page.evaluate(() => new Promise<void>((done) => {
+  // The session cookie is set just after login, and these connections need it.
+  await expect.poll(async () => (await page.context().cookies()).some((c) => c.name === "styri_session")).toBe(true);
+  const anonymousView = (value: boolean) => page.evaluate((on) => new Promise<void>((done, fail) => {
     const ws = new WebSocket(`ws://${location.host}/ws`);
-    ws.onopen = () => ws.send(JSON.stringify({ action: "SWITCHES", anonymous_view: false }));
-    ws.onmessage = (e) => { if (JSON.parse(e.data).type === "users") { ws.close(); done(); } };
-  }));
+    ws.onopen = () => ws.send(JSON.stringify({ action: "SWITCHES", anonymous_view: on }));
+    ws.onmessage = (e) => {
+      const m = JSON.parse(e.data);
+      if (m.type === "users") { ws.close(); done(); }
+      if (m.type === "error") { ws.close(); fail(new Error(m.error)); }
+    };
+  }), value);
+  await anonymousView(false);
   try {
     const stranger = await (await browser.newContext()).newPage();
     await stranger.goto("/");
@@ -216,11 +223,7 @@ test("anonymous viewing off: a stranger gets a login and no robots", async ({ pa
     for (const name of ["amr-01", "agv-07", "agv-08"]) expect(text).not.toContain(name);
     await stranger.close();
   } finally {
-    await page.evaluate(() => new Promise<void>((done) => {
-      const ws = new WebSocket(`ws://${location.host}/ws`);
-      ws.onopen = () => ws.send(JSON.stringify({ action: "SWITCHES", anonymous_view: true }));
-      ws.onmessage = (e) => { if (JSON.parse(e.data).type === "users") { ws.close(); done(); } };
-    }));
+    await anonymousView(true);
   }
 });
 
