@@ -82,6 +82,7 @@ const LOOK: Record<string, Pick<CommandView, "label" | "glyph" | "tone"> & { spi
   failed: { label: "Failed", glyph: "◆", tone: "fault" },
   not_confirmed: { label: "Not confirmed", glyph: "▲", tone: "warn" },
   cancelled: { label: "Cancelled", glyph: "", tone: "text-3" },
+  interrupted: { label: "Interrupted", glyph: "", tone: "text-3" },
 };
 const STOP_LOOK: Record<string, Pick<CommandView, "label" | "glyph" | "tone"> & { spin?: boolean }> = {
   sent: { label: "Stop sent…", glyph: "", tone: "text-1", spin: true },

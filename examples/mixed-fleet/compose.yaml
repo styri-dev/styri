@@ -10,8 +10,10 @@
 x-vda: &vda
   build: ../../e2e/vda-sim
   image: styri-vda-sim:dev
-  depends_on: [styri]
-  restart: on-failure  # until the broker is up
+  depends_on:
+    styri:
+      condition: service_healthy  # the broker is up by then
+  restart: on-failure
   networks: [fleet]
 
 services:

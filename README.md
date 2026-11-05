@@ -59,7 +59,7 @@ More than three robots? Styri Pilot is the public `ghcr.io/styri-dev/styri-pro` 
 
 ## VDA 5050 bench
 
-Free VDA 5050 bench: [styri-vda-bench](#).
+Free VDA 5050 bench: [styri-vda-bench](https://github.com/styri-dev/styri-vda-bench), an unofficial self-check.
 
 ## Help
 

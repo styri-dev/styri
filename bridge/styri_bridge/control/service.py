@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from websockets.exceptions import ConnectionClosed
 
-from ..model import Command, RobotView, advance, capabilities, is_stale, next_step, stop_over, stop_sent
+from ..model import COMMAND_STEPS, Command, RobotView, advance, capabilities, is_stale, next_step, stop_over, stop_sent
 from ..server import MAX_MESSAGE, MAX_MESSAGE_LOGGED_IN, BridgeServer, Session, peer_ip
 from ..sitemap import Graph, GraphError
 from . import commands
@@ -410,6 +410,7 @@ class Control:
         row = self.audit.record("command", client=session.client, user=self._user(session), action=action, robot=robot,
                                 payload={**payload, **sent}, user_agent=self._agent(session))
         if action in TRACKED:
+            self._close_goal(view, action)
             self._track(view, action, row, self._user(session), data, sent, before)
         if action == "PAUSE":
             view.live.paused_by = self._user(session)
@@ -417,7 +418,15 @@ class Control:
             view.live.paused_by = None
         if action == "OPERATOR_STOP":
             view.monitor.activity.add("warning", f"Operator stop from {session.client} ({self._user(session)})", "control")
+            self.bridge.publish_threadsafe(self.bridge.fleet())  # show "Stop sent" now, not at the next tick
         return {"type": "ack", "action": action, "robot": robot, "id": data.get("id")}
+
+    def _close_goal(self, view: RobotView, action: str) -> None:
+        """A goal that a stop, a cancel or a new goal took over won't report again, so its row mustn't stay Running."""
+        old = view.live.command
+        if action in ("OPERATOR_STOP", "CANCEL", "GOAL") and old and old.action == "GOAL" and old.status in COMMAND_STEPS[:3]:
+            advance(old, "interrupted", None)
+            self.audit.record("command_step", ref=old.row, status=old.status, steps=old.steps, reason=None)
 
     @staticmethod
     def _track(view: RobotView, action: str, row: int, user: str, data: dict, sent: dict, before: str | None) -> None:
@@ -530,4 +539,5 @@ class Control:
         failed = [r["robot"] for r in results if r and r["type"] == "error" and not r.get("limited")]
         self.audit.record("command", client=session.client, user=self._user(session), action="OPERATOR_STOP_ALL",
                           failed=failed, user_agent=self._agent(session))
+        self.bridge.publish_threadsafe(self.bridge.fleet())  # the banner, with every stop sent
         return {"type": "ack", "action": "OPERATOR_STOP_ALL", "failed": failed, "id": data.get("id")}
