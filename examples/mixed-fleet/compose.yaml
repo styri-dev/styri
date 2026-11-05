@@ -1,6 +1,6 @@
 # Mixed fleet: one ROS 2 sim robot and two VDA 5050 sim vehicles, on one map.
 #
-#   docker compose up --build        then open http://localhost:8080
+#   docker compose up        then open http://localhost:8080 (the first run builds)
 #
 # Log in with the password below to command them. Everything here is simulated.
 # The site folder is a volume, so the map editor can save: `docker compose down -v`

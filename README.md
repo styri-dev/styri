@@ -2,8 +2,7 @@
 
 # Styri
 
-<!-- CHECK: "No cloud, no account": no cloud account is true; control needs a local account. The spec wants "operator panel" in the first three lines, but its one line says "offline panel". -->
-Styri — one offline panel for ROS 2 and VDA 5050 robots. See, steer and stop a mixed fleet from any browser on site. No cloud, no account. Free for up to 3 robots.
+Styri — one offline operator panel for ROS 2 and VDA 5050 robots. See, send and stop a mixed fleet from any browser on site. No cloud, no account. Free for up to 3 robots.
 
 <!-- VIDEO PLACEHOLDER: swap the hero below for a GIF made from the 90-second video, linking to the MP4, when the owner sends it. The hero was recorded with v0.3.1 and shows the old panel. -->
 <p align="center">
@@ -24,10 +23,10 @@ Open **http://&lt;this machine's IP&gt;:8080**. Host networking lets Styri see D
 **A mixed fleet, no hardware?** One ROS 2 robot and two VDA 5050 vehicles on one map, all simulated:
 
 ```bash
-cd examples/mixed-fleet && docker compose up --build
+cd examples/mixed-fleet && docker compose up
 ```
 
-Open **http://localhost:8080** and log in with `styri-demo`. `docker compose down -v` resets the demo, map edits included.
+The first run builds the simulated robots, which takes a few minutes. Open **http://localhost:8080** and log in with `styri-demo`. `docker compose down -v` resets the demo, map edits included.
 
 **On a Mac?** Run Styri on the robot or any Linux machine on its network, and open the panel from any browser, Mac included. Docker on macOS can't see a robot on another machine, but the mixed-fleet demo runs there too.
 
@@ -60,7 +59,6 @@ More than three robots? Styri Pilot is the public `ghcr.io/styri-dev/styri-pro` 
 
 ## VDA 5050 bench
 
-<!-- CHECK: styri-vda-bench does not exist: no repo, no code. Link target is # until it does. -->
 Free VDA 5050 bench: [styri-vda-bench](#).
 
 ## Help

@@ -2,6 +2,8 @@
 
 What Styri v2.0 works with, and what it keeps from v1.
 
+Tested against simulators; real-robot results are added as they're run.
+
 ## Robots
 
 | | Supported |
