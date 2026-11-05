@@ -406,7 +406,7 @@ function MapPane({ ctx }: { ctx: PanelContext }) {
       {placed.map((v) => {
         const r = v.r, mine = r.name === ui.sel;
         const dimmed = focus && !mine;
-        const inner = v.key === "offline" ? "⊘" : v.paused || r.stop === "stopped" ? "❚❚" : v.driven ? "◎" : "";
+        const inner = v.key === "offline" ? "⊘" : v.paused ? "❚❚" : v.driven ? "◎" : "";
         return (
           <button key={r.id} type="button" className={`marker ${editing || send ? "is-inert" : ""}`} data-robot={r.name} data-marker={v.key} aria-label={r.name}
             style={{ left: X(r.pose!.x), top: Y(r.pose!.y), opacity: dimmed ? 0.45 : v.key === "stale" ? 0.8 : v.key === "offline" ? 0.75 : 1, zIndex: mine ? 4 : 2 }}
