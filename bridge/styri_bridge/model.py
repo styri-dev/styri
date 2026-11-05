@@ -128,6 +128,9 @@ def has_speed_feedback(robot: RobotMap) -> bool:
 
 def stop_sent(live: Live) -> None:
     live.stop_sent_at, live.stop_replied, live.stop_done_at, live.stop_at = time.monotonic(), False, None, None
+    # Already standing, with nothing to do: many robots say nothing then, and that's no alarm.
+    if live.driving is False and live.task_state != "active" and live.online is not False:
+        saw_motion(live, False)
 
 
 def stop_over(live: Live) -> None:

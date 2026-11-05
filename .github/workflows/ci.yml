@@ -133,6 +133,15 @@ jobs:
         env:
           E2E_EDITOR: "1"
         run: npx playwright test --config mixed.config.ts editor
+      - name: First run
+        run: |
+          docker compose -f compose.yaml -f ../../e2e/mixed-fleet/editor.yaml down -t 2 -v
+          docker compose -f compose.yaml -f ../../e2e/mixed-fleet/first-run.yaml up -d
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 1 http://localhost:8080/healthz
+      - working-directory: e2e
+        env:
+          E2E_FIRST_RUN: "1"
+        run: npx playwright test --config mixed.config.ts first-run
       - if: failure()
         uses: actions/upload-artifact@v7
         with:

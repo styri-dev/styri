@@ -186,6 +186,44 @@ test("a stop that works says Stopped, and the card stays as it was", async ({ pa
   await expect(page.getByTestId("control-drawer")).not.toHaveClass(/is-stop-failed/);
 });
 
+test("a robot that goes silent: No reply, the card turns red, its health stays", async ({ page }) => {
+  execSync("docker compose stop -t 1 agv-07", { cwd: DEMO, stdio: "ignore" });
+  const fake = spawn("docker", ["compose", "exec", "-T", "-e", "FAKE_SECONDS=5", "styri", "/ros_entrypoint.sh", "python3", "-"],
+    { cwd: DEMO, stdio: ["pipe", "ignore", "ignore"] });
+  createReadStream(FAKE).pipe(fake.stdin);
+  await page.goto("/#robot/agv-07");
+  await page.waitForTimeout(7000); // it has stopped talking, and still looks online
+  await page.getByTestId("operator-stop").click();
+  await expect(page.getByTestId("stop-alert")).toContainText("No reply from robot", { timeout: 8000 });
+  await expect(page.getByTestId("stop-alert")).toContainText("use the robot's own hardware stop");
+  fake.kill();
+});
+
+test("anonymous viewing off: a stranger gets a login and no robots", async ({ page, browser }) => {
+  await page.goto("/");
+  await login(page);
+  await page.evaluate(() => new Promise<void>((done) => {
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onopen = () => ws.send(JSON.stringify({ action: "SWITCHES", anonymous_view: false }));
+    ws.onmessage = (e) => { if (JSON.parse(e.data).type === "users") { ws.close(); done(); } };
+  }));
+  try {
+    const stranger = await (await browser.newContext()).newPage();
+    await stranger.goto("/");
+    await expect(stranger.getByLabel("Password")).toBeVisible();
+    await stranger.waitForTimeout(2500);
+    const text = await stranger.locator("body").innerText();
+    for (const name of ["amr-01", "agv-07", "agv-08"]) expect(text).not.toContain(name);
+    await stranger.close();
+  } finally {
+    await page.evaluate(() => new Promise<void>((done) => {
+      const ws = new WebSocket(`ws://${location.host}/ws`);
+      ws.onopen = () => ws.send(JSON.stringify({ action: "SWITCHES", anonymous_view: true }));
+      ws.onmessage = (e) => { if (JSON.parse(e.data).type === "users") { ws.close(); done(); } };
+    }));
+  }
+});
+
 test("Stop all: a tap does nothing, a one-second hold stops the fleet", async ({ page }) => {
   await page.goto("/#activity");
   const stops = page.getByText(/Operator stop from/);

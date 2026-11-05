@@ -37,11 +37,13 @@ function BigTile({ v, one, ctx, verdictSize }: { v: RobotView; one: boolean; ctx
             ))}
           </div>
           <div className="spacer" />
-          <div className={`ftile__bat ${v.dim ? "is-dim" : ""}`}>
-            <span className="microlabel microlabel--lg">BATTERY</span>
-            <span className={`ftile__batnum ${v.batteryLow ? "tone-warn" : ""}`} data-testid="battery">{v.battery}</span>
-            <span className="ftile__pct">%</span>
-          </div>
+          {/\d/.test(String(v.battery)) && (
+            <div className={`ftile__bat ${v.dim ? "is-dim" : ""}`}>
+              <span className="microlabel microlabel--lg">BATTERY</span>
+              <span className={`ftile__batnum ${v.batteryLow ? "tone-warn" : ""} ${String(v.battery).length > 2 ? "is-full" : ""}`} data-testid="battery">{v.battery}</span>
+              <span className="ftile__pct">%</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -235,6 +235,7 @@ p { margin: 0; }
 .ftile__vnum { font-family: var(--font-mono); font-size: 22px; font-weight: 500; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ftile__bat { display: flex; align-items: baseline; gap: 10px; }
 .ftile__batnum { font-family: var(--font-mono); font-size: 112px; font-weight: 500; line-height: 0.9; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.ftile__batnum.is-full { font-size: 84px; } /* three digits, in the narrowest tile */
 .ftile--grid .ftile__batnum { font-size: 36px; line-height: 1; letter-spacing: -0.03em; }
 .ftile__pct { font-family: var(--font-mono); font-size: 28px; color: var(--text-3); }
 .ftile--grid .ftile__pct { font-size: 15px; letter-spacing: 0; }

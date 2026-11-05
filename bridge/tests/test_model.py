@@ -215,6 +215,16 @@ def test_silence_and_still_moving_are_different_messages():
     assert model.stop_status(v, t + 16) == "stopped"
 
 
+def test_stopping_a_robot_already_standing_is_no_alarm():
+    v = robot_view(cmd_vel="/v", odom="/o")
+    v.live.driving = False
+    model.stop_sent(v.live)
+    assert model.stop_status(v, v.live.stop_sent_at + 5) == "stopped"
+    v.live.task_state = "active"  # it was last still, but it has somewhere to go
+    model.stop_sent(v.live)
+    assert model.stop_status(v, v.live.stop_sent_at + 5) == "no_reply"
+
+
 def test_a_stop_leaves_the_robots_health_alone():
     v = robot_view(cmd_vel="/v", odom="/o")
     model.stop_sent(v.live)

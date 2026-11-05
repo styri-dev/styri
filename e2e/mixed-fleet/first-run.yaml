@@ -1,0 +1,8 @@
+# A site on its first day: no admin password yet, and a ROS 2 robot with no speed feedback.
+services:
+  styri:
+    environment:
+      STYRI_ADMIN_PASSWORD: ""
+      STYRI_CONFIG: /etc/styri/styri-no-feedback.yaml
+    volumes:
+      - ../../e2e/mixed-fleet/styri-no-feedback.yaml:/etc/styri/styri-no-feedback.yaml:ro
