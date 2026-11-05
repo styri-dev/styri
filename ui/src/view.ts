@@ -83,6 +83,7 @@ const LOOK: Record<string, Pick<CommandView, "label" | "glyph" | "tone"> & { spi
   not_confirmed: { label: "Not confirmed", glyph: "▲", tone: "warn" },
   cancelled: { label: "Cancelled", glyph: "", tone: "text-3" },
   interrupted: { label: "Interrupted", glyph: "", tone: "text-3" },
+  paused: { label: "Paused", glyph: "❚❚", tone: "text-2" },
 };
 const STOP_LOOK: Record<string, Pick<CommandView, "label" | "glyph" | "tone"> & { spin?: boolean }> = {
   sent: { label: "Stop sent…", glyph: "", tone: "text-1", spin: true },
@@ -94,7 +95,7 @@ const STOP_LOOK: Record<string, Pick<CommandView, "label" | "glyph" | "tone"> & 
 
 export function commandView(status: string, steps: string[] | undefined, stop: boolean): CommandView {
   const look = (stop ? STOP_LOOK : LOOK)[status] ?? LOOK.sent;
-  const ended = !["sent", "accepted", "running"].includes(status);
+  const ended = !["sent", "accepted", "running", "paused"].includes(status);
   if (status === "refused") {
     return { ...look, spin: false, ended, bars: [], chain: [{ label: "Refused by Styri · never sent to the robot", tone: look.tone, strong: true }] };
   }
@@ -280,12 +281,12 @@ export function robotView(r: RobotModel, env: RobotEnv): RobotView {
   const speedValue = r.velocity ? Math.abs(r.velocity.linear) : null;
   const vitals: Vital[] = [{ label: "SPEED", value: speedValue == null ? "—" : speedValue.toFixed(1), unit: "m/s" }];
   if (cpu) vitals.push({ label: "CPU", value: cpu.value.toFixed(0), unit: "°C", warn: cpu.warn });
-  if (r.voltage != null) {
-    const min = state.hello?.min_voltage;
-    vitals.push({ label: "VOLTAGE", value: r.voltage.toFixed(1), unit: "V", warn: min != null && r.voltage < min });
-  }
-  const fieldTile = (snap?.fields ?? []).find((f) => typeof f.value === "number");
-  if (vitals.length < 3 && fieldTile) vitals.push({ label: (fieldTile.label ?? "").toUpperCase(), value: Number(fieldTile.value).toFixed(1), unit: fieldTile.unit, warn: fieldTile.level !== "ok" });
+  // Then whatever is closest to its limit: a value already flagged first, then the voltage.
+  const min = state.hello?.min_voltage;
+  const rest: Vital[] = (snap?.fields ?? []).filter((f) => typeof f.value === "number")
+    .map((f) => ({ label: (f.label ?? "").toUpperCase(), value: Number(f.value).toFixed(1), unit: f.unit, warn: f.level !== "ok" }));
+  if (r.voltage != null) rest.unshift({ label: "VOLTAGE", value: r.voltage.toFixed(1), unit: "V", warn: min != null && r.voltage < min });
+  vitals.push(...rest.sort((a, b) => Number(!!b.warn) - Number(!!a.warn)).slice(0, 3 - vitals.length));
 
   const battery = r.battery == null ? "—" : r.battery.toFixed(0);
   const short = unconfirmed ? SHORT_UNCONFIRMED[r.stop!]! : reason;

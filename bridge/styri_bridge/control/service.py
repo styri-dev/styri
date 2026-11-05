@@ -23,7 +23,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from websockets.exceptions import ConnectionClosed
 
-from ..model import COMMAND_STEPS, Command, RobotView, advance, capabilities, is_stale, next_step, stop_over, stop_sent
+from ..model import COMMAND_STEPS, Command, RobotView, advance, capabilities, held_goal_step, is_stale, next_step, stop_over, stop_sent
 from ..server import MAX_MESSAGE, MAX_MESSAGE_LOGGED_IN, BridgeServer, Session, peer_ip
 from ..sitemap import Graph, GraphError
 from . import commands
@@ -425,11 +425,18 @@ class Control:
         return {"type": "ack", "action": action, "robot": robot, "id": data.get("id")}
 
     def _close_goal(self, view: RobotView, action: str) -> None:
-        """A goal that a stop, a cancel or a new goal took over won't report again, so its row mustn't stay Running."""
-        old = view.live.command
-        if action in ("OPERATOR_STOP", "CANCEL", "GOAL") and old and old.action == "GOAL" and old.status in COMMAND_STEPS[:3]:
-            advance(old, "interrupted", None)
-            self.audit.record("command_step", ref=old.row, status=old.status, steps=old.steps, reason=None)
+        """A goal a stop, a cancel or a new goal took over won't report again, so its row mustn't stay Running.
+        One behind a Pause or Resume is still going: it's followed to its end."""
+        live, old = view.live, view.live.command
+        if old and old.action == "GOAL" and old.status in COMMAND_STEPS[:3]:
+            live.goal = old
+        if live.goal and action in ("OPERATOR_STOP", "CANCEL", "GOAL"):
+            self._goal_step(live.goal, "interrupted", None)
+            live.goal = None
+
+    def _goal_step(self, goal: Command, status: str, reason: str | None) -> None:
+        advance(goal, status, reason)
+        self.audit.record("command_step", ref=goal.row, status=goal.status, steps=goal.steps, reason=goal.reason)
 
     @staticmethod
     def _track(view: RobotView, action: str, row: int, user: str, data: dict, sent: dict, before: str | None) -> None:
@@ -442,9 +449,12 @@ class Control:
         for view in self.bridge.robots:
             step = next_step(view)
             if step is not None:
-                cmd = view.live.command
-                advance(cmd, *step)
-                self.audit.record("command_step", ref=cmd.row, status=cmd.status, steps=cmd.steps, reason=cmd.reason)
+                self._goal_step(view.live.command, *step)
+            held = held_goal_step(view.live)
+            if held is not None:
+                self._goal_step(view.live.goal, *held)
+                if held[0] not in ("paused", "running"):
+                    view.live.goal = None
 
     def _refusal(self, user: User | None, action: str) -> str | None:
         """Who may do what. Anyone may stop: it's the safe direction, and undoing one needs an operator."""

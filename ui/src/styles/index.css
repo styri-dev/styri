@@ -204,7 +204,7 @@ p { margin: 0; }
 .ftile { display: flex; flex-direction: column; min-width: 0; border-radius: var(--r-3); cursor: pointer; }
 .ftile--big, .ftile--grid { border: var(--tile-bw) solid var(--tile-bd); background: var(--tile-bg); }
 .ftile--big:hover, .ftile--grid:hover { border-color: var(--line-strong); }
-.ftile--big { gap: 12px; min-height: 0; padding: 24px; overflow: hidden; }
+.ftile--big { gap: 12px; min-height: 0; padding: 24px; overflow: hidden; container-type: size; }
 .ftile--grid { gap: 10px; padding: 14px 16px; }
 .ftile__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .ftile__id { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
@@ -234,11 +234,14 @@ p { margin: 0; }
 .ftile__vitals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
 .ftile--one .ftile__vitals { padding-top: 0; border-top: 0; }
 .ftile__vitals > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.ftile__vnum { font-family: var(--font-mono); font-size: 22px; font-weight: 500; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ftile__bat { display: flex; align-items: baseline; gap: 10px; }
-.ftile__batnum { font-family: var(--font-mono); font-size: 112px; font-weight: 500; line-height: 0.9; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
-.ftile__batnum.is-full { font-size: 84px; } /* three digits, in the narrowest tile */
-.ftile--grid .ftile__batnum { font-size: 36px; line-height: 1; letter-spacing: -0.03em; }
+.ftile__vnum { font-family: var(--font-mono); font-size: clamp(22px, 4cqh, 34px); font-weight: 500; line-height: 1.1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ftile__bat { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 4px 10px; }
+.ftile__bat .microlabel { grid-column: 1 / -1; }
+.ftile__batnum { font-family: var(--font-mono); font-size: clamp(84px, min(56cqw, 36cqh), 260px); font-weight: 500; line-height: 0.9; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.ftile__batnum.is-full { font-size: clamp(84px, min(38cqw, 36cqh), 260px); } /* three digits */
+.ftile--one .ftile__batnum { font-size: clamp(84px, min(26cqw, 44cqh), 320px); }
+.ftile--one .ftile__batnum.is-full { font-size: clamp(84px, min(18cqw, 44cqh), 320px); }
+.ftile--grid .ftile__batnum, .ftile--grid .ftile__batnum.is-full { font-size: 36px; line-height: 1; letter-spacing: -0.03em; }
 .ftile__pct { font-family: var(--font-mono); font-size: 28px; color: var(--text-3); }
 .ftile--grid .ftile__pct { font-size: 15px; letter-spacing: 0; }
 .ftile__foot { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: end; padding-top: 10px; border-top: 1px solid var(--line); }

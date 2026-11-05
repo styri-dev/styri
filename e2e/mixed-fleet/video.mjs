@@ -108,8 +108,6 @@ await shot("03-terminal", 8, async (at) => {
 // 20–35 s: every robot on one map; send agv-07.
 await page.evaluate(() => { location.hash = "#map"; });
 await wait(1.5);
-await tapOn(page.getByRole("button", { name: "Fit all" }));
-await wait(1);
 await shot("04-map-send", 15, async (at) => {
   await at(2);
   await pick("agv-07");

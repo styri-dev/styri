@@ -69,6 +69,7 @@ class Live:
     stop_done_at: float | None = None  # it reported standing still
     stop_at: float | None = None  # the same moment, in unix seconds
     paused_by: str | None = None  # who pressed Pause; None if it stopped some other way
+    goal: Command | None = None   # a goal still open behind a Pause or Resume, followed to its end
     driver: str | None = None     # who's holding the joystick
     goal_rejected: bool = False   # Nav2 turned the last goal down
     command: Command | None = None
@@ -182,6 +183,19 @@ def _goal_step(cmd: Command, live: Live, waited: float) -> tuple[str, str | None
     return ("done" if live.task_state == "done" else "running"), None
 
 
+def held_goal_step(live: Live, now: float | None = None) -> tuple[str, str | None] | None:
+    """A goal behind a Pause or Resume: paused while the robot says so, then on to its end."""
+    goal = live.goal
+    if goal is None:
+        return None
+    waited = (time.monotonic() if now is None else now) - goal.started
+    step = _goal_step(goal, live, waited)
+    if step is not None and step[0] != "running":
+        return step
+    want = "paused" if live.paused else "running"
+    return None if want == goal.status else (want, None)
+
+
 def next_step(view: RobotView, now: float | None = None) -> tuple[str, str | None] | None:
     """How far the last command has got, from what the robot reports: (status, reason). None: nothing new."""
     cmd, live = view.live.command, view.live
@@ -208,7 +222,7 @@ def advance(cmd: Command, status: str, reason: str | None) -> None:
     """Move a command on. Steps it went through unseen, between two looks, count as passed."""
     if status in COMMAND_STEPS:
         cmd.steps += [s for s in COMMAND_STEPS[:COMMAND_STEPS.index(status) + 1] if s not in cmd.steps]
-    else:
+    elif status not in cmd.steps:
         cmd.steps.append(status)
     cmd.status, cmd.reason = status, reason
 

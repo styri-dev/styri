@@ -59,7 +59,7 @@ export function Marker({ protocol, kind, selected, unconfirmed, outline, size = 
     <svg className="marker__svg" width={size} height={size} viewBox="-28 -28 56 56">
       <g transform={`rotate(${heading})`}>
         {ring && (ros ? <circle r={21} fill="none" stroke={ring} strokeWidth={3} /> : <rect x={-21} y={-16} width={42} height={32} rx={9} fill="none" stroke={ring} strokeWidth={3} />)}
-        <path d={ros ? "M17,-6 L26,0 L17,6 Z" : "M20,-6 L29,0 L20,6 Z"} fill={arrow} />
+        <path d={ros ? "M17,-6 L26,0 L17,6 Z" : "M19,-6 L28,0 L19,6 Z"} fill={arrow} />
         {ros ? <circle r={13} fill={fill} stroke={stroke} strokeWidth={sw} strokeDasharray={dash} />
           : <rect x={-16} y={-11} width={32} height={22} rx={5} fill={fill} stroke={stroke} strokeWidth={sw} strokeDasharray={dash} />}
       </g>

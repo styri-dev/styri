@@ -1,6 +1,7 @@
 # One ROS 2 robot and two VDA 5050 vehicles on one map, in one panel.
 site:
   name: demo-plant
+  map: /etc/styri/site/floor.yaml
   graph: /etc/styri/site/graph.json
 
 control:

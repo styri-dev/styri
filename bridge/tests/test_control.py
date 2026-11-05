@@ -840,6 +840,52 @@ def test_a_browser_that_just_left_does_not_stop_a_switch():
     bridge(go)
 
 
+def test_a_goal_behind_a_pause_shows_paused_then_runs_on_to_done():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await login(ws)
+            await ask(ws, action="GOAL", robot="a", x=1.0, y=2.0, theta=0.0)
+            server.snapshot(0)
+            live = server.robots[0].live
+            live.task_id, live.task_state = "g1", "active"
+            fleet_of(server)
+
+            async def goal():
+                fleet_of(server)
+                rows_ = (await ask(ws, action="AUDIT", robot="a"))["rows"]
+                return next(r for r in rows_ if r["command"] == "GOAL")["status"]
+
+            await ask(ws, action="PAUSE", robot="a")
+            live.paused = True
+            assert await goal() == "paused"
+            await ask(ws, action="RESUME", robot="a")
+            live.paused = False
+            assert await goal() == "running"
+            live.task_state = "done"
+            assert await goal() == "done"
+            assert live.goal is None
+    bridge(go)
+
+
+def test_a_paused_goal_a_stop_took_over_is_interrupted():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await login(ws)
+            await ask(ws, action="GOAL", robot="a", x=1.0, y=2.0, theta=0.0)
+            server.snapshot(0)
+            live = server.robots[0].live
+            live.task_id, live.task_state = "g1", "active"
+            fleet_of(server)
+            await ask(ws, action="PAUSE", robot="a")
+            live.paused = True
+            fleet_of(server)
+            await ask(ws, action="OPERATOR_STOP", robot="a")
+            rows_ = (await ask(ws, action="AUDIT", robot="a"))["rows"]
+            assert next(r for r in rows_ if r["command"] == "GOAL")["status"] == "interrupted"
+            assert live.goal is None
+    bridge(go)
+
+
 def test_a_refusal_is_refused_in_the_log_and_never_a_step():
     async def go(url, server, audit, sink, control):
         async with connect(url) as ws:
