@@ -21,7 +21,9 @@ from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from ..model import RobotView, capabilities, is_stale, stop_over, stop_sent
+from websockets.exceptions import ConnectionClosed
+
+from ..model import Command, RobotView, advance, capabilities, is_stale, next_step, stop_over, stop_sent
 from ..server import MAX_MESSAGE, MAX_MESSAGE_LOGGED_IN, BridgeServer, Session, peer_ip
 from ..sitemap import Graph, GraphError
 from . import commands
@@ -38,6 +40,9 @@ STALE = "This robot's data is stale: teleop and waypoints are off. Operator stop
 OTHER_DRIVER = "Being driven by another session"
 AUDIT_ROWS = 200
 ANONYMOUS_STOP_EVERY = 2.0  # seconds per robot, for stops without a login
+TRACKED = ("GOAL", "PAUSE", "RESUME", "CANCEL", "OPERATOR_STOP")  # the commands with steps to follow
+SESSION_WARNING = 120.0  # seconds before a session ends that the panel says so
+SESSION_CHECK = 5.0
 
 
 class Refused(Exception):
@@ -60,6 +65,7 @@ class Control:
         self.stop_requires_login = settings.stop_requires_login
         self.clock = time.monotonic
         self._anonymous_stops: dict[int, float] = {}  # robot index -> last stop without a login
+        self._drives: dict[int, float] = {}  # robot index -> when the drive started
         self._saving = asyncio.Lock()
 
     def attach(self) -> "Control":
@@ -70,6 +76,7 @@ class Control:
         b.actions["LOGIN"] = self._login
         b.actions["SETUP"] = self._setup
         b.actions["LOGOUT"] = self._logout
+        b.actions["SESSION_KEEP"] = self._session_keep
         b.actions["AUDIT"] = self._audit_rows
         b.actions["GRAPH_SAVE"] = self._graph_save
         for action, handler in (("USERS", self._users), ("USER_ADD", self._user_add), ("USER_REMOVE", self._user_remove),
@@ -88,7 +95,9 @@ class Control:
         b.on_disconnect.append(self.teleop.disconnected)
         b.on_ros_node.append(self._ros_node)
         b.on_shutdown.append(self.teleop.stop)
+        b.on_fleet.append(self._follow_commands)
         b.background.append(self._start_watchdog)
+        b.background.append(self._watch_sessions)
         return self
 
     async def _start_watchdog(self) -> None:
@@ -186,6 +195,40 @@ class Control:
         if not self.switches.anonymous_view:
             await self.bridge.close_view(session)
         return {"type": "auth", "control": self._status(session)}
+
+    async def _session_keep(self, session: Session, data: dict) -> dict:
+        """Stay logged in: any use of a session keeps it alive."""
+        session.data.pop("warned", None)
+        self._account(session, touch=True)
+        return {"type": "auth", "control": self._status(session)}
+
+    async def _watch_sessions(self) -> None:
+        while True:
+            await asyncio.sleep(SESSION_CHECK)
+            await self.session_notices()
+
+    async def session_notices(self) -> None:
+        """A session ends after inactivity. Say so first, and tell the panel when it has."""
+        for session in list(self.bridge.sessions):
+            token = session.data.get("token")
+            if token is None:
+                continue
+            left = self.accounts.remaining(token)
+            try:
+                if left == 0:
+                    session.data.pop("token")
+                    session.data.pop("warned", None)
+                    session.ws.protocol.max_message_size = MAX_MESSAGE
+                    await session.ws.send(json.dumps({"type": "auth", "control": self._status(session)}))
+                    if not self.switches.anonymous_view:
+                        await self.bridge.close_view(session)
+                elif left <= SESSION_WARNING:
+                    session.data["warned"] = True
+                    await session.ws.send(json.dumps({"type": "session", "ends_in": round(left)}))
+                elif session.data.pop("warned", False):
+                    await session.ws.send(json.dumps({"type": "session", "ends_in": None}))
+            except ConnectionClosed:
+                pass
 
     def _set_cookie(self, connection, request):
         query = parse_qs(urlsplit(request.path).query)
@@ -355,6 +398,8 @@ class Control:
             if action == "TELEOP_RELEASE":
                 self.teleop.release(view.index, "released", session)
                 return None
+            before = view.live.task_id
+            view.live.goal_rejected = False
             sent = await self._send(view, action, data)
         except CommandError as exc:
             return self._reject(session, action, str(exc), robot, payload)
@@ -362,11 +407,32 @@ class Control:
             return self._reject(session, action, str(exc), robot, payload)
         except RuntimeError as exc:  # SinkError, VdaError: couldn't be carried out
             return self._reject(session, action, str(exc), robot, payload)
-        self.audit.record("command", client=session.client, user=self._user(session), action=action, robot=robot,
-                          payload={**payload, **sent}, user_agent=self._agent(session))
+        row = self.audit.record("command", client=session.client, user=self._user(session), action=action, robot=robot,
+                                payload={**payload, **sent}, user_agent=self._agent(session))
+        if action in TRACKED:
+            self._track(view, action, row, self._user(session), data, sent, before)
+        if action == "PAUSE":
+            view.live.paused_by = self._user(session)
+        elif action == "RESUME":
+            view.live.paused_by = None
         if action == "OPERATOR_STOP":
             view.monitor.activity.add("warning", f"Operator stop from {session.client} ({self._user(session)})", "control")
         return {"type": "ack", "action": action, "robot": robot, "id": data.get("id")}
+
+    @staticmethod
+    def _track(view: RobotView, action: str, row: int, user: str, data: dict, sent: dict, before: str | None) -> None:
+        point = (data["x"], data["y"]) if isinstance(data.get("x"), (int, float)) and isinstance(data.get("y"), (int, float)) else None
+        view.live.command = Command(row, action, user, time.time(), time.monotonic(), node=(sent.get("nodes") or [None])[-1],
+                                    point=point, order=sent.get("order_id"), before=before)
+
+    def _follow_commands(self) -> None:
+        """Each command's next step, from what its robot reports. In the model for the panel, in the log to keep."""
+        for view in self.bridge.robots:
+            step = next_step(view)
+            if step is not None:
+                cmd = view.live.command
+                advance(cmd, *step)
+                self.audit.record("command_step", ref=cmd.row, status=cmd.status, steps=cmd.steps, reason=cmd.reason)
 
     def _refusal(self, user: User | None, action: str) -> str | None:
         """Who may do what. Anyone may stop: it's the safe direction, and undoing one needs an operator."""
@@ -440,20 +506,26 @@ class Control:
             raise Refused(OTHER_DRIVER)
         if started:
             stop_over(view.live)
+            view.live.driver = self._user(session)
+            self._drives[view.index] = self.clock()
             self.audit.record("command", client=session.client, user=self._user(session), action="TELEOP", robot=view.id,
                               payload={"event": "start", "limits": [link.max_linear, link.max_angular]})
         return None  # streams at 10-20 Hz: no reply per message
 
     def _drive_ended(self, session: Session, view: RobotView, reason: str) -> None:
+        view.live.driver = None
+        seconds = round(self.clock() - self._drives.pop(view.index, self.clock()))
         self.audit.record("command", client=session.client, user=self._user(session), action="TELEOP", robot=view.id,
-                          payload={"event": "stop", "reason": reason})
+                          payload={"event": "stop", "reason": reason, "seconds": seconds})
 
     async def _stop_all(self, session: Session, data: dict) -> dict:
         refused = self._refusal(self._account(session, touch=True), "OPERATOR_STOP_ALL")
         if refused:
             return self._reject(session, "OPERATOR_STOP_ALL", refused)
-        results = await asyncio.gather(*(self._robot_command(session, "OPERATOR_STOP", {"robot": v.id})
-                                         for v in self.bridge.robots if capabilities(v.map, v.live)["can_stop"]))
+        robots = [v for v in self.bridge.robots if capabilities(v.map, v.live)["can_stop"]]
+        self.bridge.stop_all_run = {"id": self.audit.record("stop_all", client=session.client, user=self._user(session)),
+                                    "robots": {v.name: "sent" for v in robots}}
+        results = await asyncio.gather(*(self._robot_command(session, "OPERATOR_STOP", {"robot": v.id}) for v in robots))
         # A robot whose stop went out moments ago is stopping: that's not a failure.
         failed = [r["robot"] for r in results if r and r["type"] == "error" and not r.get("limited")]
         self.audit.record("command", client=session.client, user=self._user(session), action="OPERATOR_STOP_ALL",

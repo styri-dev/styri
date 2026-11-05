@@ -150,7 +150,9 @@ class Accounts:
 
     def list(self) -> list[dict]:
         self._fresh()
-        return [{"name": n, "role": u["role"], "last_login": u.get("last_login")} for n, u in sorted(self._users.items())]
+        online = {s[0] for s in self._sessions.values() if self.clock() - s[1] <= self.lifetime}
+        return [{"name": n, "role": u["role"], "last_login": u.get("last_login"), "active": n in online}
+                for n, u in sorted(self._users.items())]
 
     def _admins(self) -> int:
         return sum(u["role"] == ADMIN for u in self._users.values())
@@ -263,6 +265,11 @@ class Accounts:
         if touch:
             session[1] = now
         return user
+
+    def remaining(self, token: str | None) -> float:
+        """Seconds until this session ends if nothing uses it; 0 if it has."""
+        session = self._sessions.get(_key(token)) if token else None
+        return max(0.0, session[1] + self.lifetime - self.clock()) if session else 0.0
 
     def valid(self, token: str | None, touch: bool = True) -> bool:
         return self.user(token, touch) is not None

@@ -24,6 +24,12 @@ class SinkError(RuntimeError):
     """A command can't be carried out. The message is for the operator."""
 
 
+def _goal_answered(view, done) -> None:
+    """Nav2 says at once whether it takes a goal; the status topic never mentions one it turned down."""
+    if not done.result().accepted:
+        view.live.goal_rejected = True
+
+
 class RosSink:
     def __init__(self, node, robot: RobotMap):
         from action_msgs.srv import CancelGoal
@@ -59,7 +65,7 @@ class RosSink:
         goal.pose.header.stamp = self.node.get_clock().now().to_msg()
         goal.pose.pose.position.x, goal.pose.pose.position.y = x, y
         goal.pose.pose.orientation.z, goal.pose.pose.orientation.w = math.sin(theta / 2), math.cos(theta / 2)
-        self._nav.send_goal_async(goal)
+        self._nav.send_goal_async(goal).add_done_callback(lambda done: _goal_answered(view, done))
 
     async def pause(self, view) -> None:
         self._pause.publish(self._Bool(data=True))

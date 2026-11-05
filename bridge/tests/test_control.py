@@ -780,3 +780,111 @@ def test_the_terminal_tool_and_a_running_panel_share_accounts(tmp_path, capsys, 
     assert run("list") == 0 and "m.lind" in capsys.readouterr().out
     assert run("remove", "admin") == 1 and "last admin" in capsys.readouterr().err
     assert run("remove", "m.lind") == 0 and panel.get("m.lind") is None
+
+
+# ---- what the panel shows about commands, and sessions ------------------------
+
+def fleet_of(server, name="a"):
+    return next(r for r in server.fleet()["robots"] if r["name"] == name)
+
+
+def test_a_command_steps_along_in_the_model_and_in_the_log():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await login(ws)
+            await ask(ws, action="GOAL", robot="a", x=1.0, y=2.0, theta=0.0)
+            server.snapshot(0)
+            assert fleet_of(server)["command"]["status"] == "sent"
+            live = server.robots[0].live
+            live.task_id, live.task_state = "g1", "active"
+            cmd = fleet_of(server)["command"]
+            assert (cmd["status"], cmd["point"], cmd["user"]) == ("running", (1.0, 2.0), "admin")
+            live.task_state = "done"
+            assert fleet_of(server)["command"]["status"] == "done"
+            (row,) = rows(audit, "command")
+            assert row["status"] == "done" and row["steps"] == ["sent", "accepted", "running", "done"]
+    bridge(go)
+
+
+def test_a_refusal_is_refused_in_the_log_and_never_a_step():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await ask(ws, action="GOAL", robot="a", x=1.0, y=2.0, theta=0.0)
+            (row,) = rows(audit, "command_rejected")
+            assert row["status"] == "refused"
+    bridge(go)
+
+
+def test_the_model_says_who_paused_a_robot():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await login(ws)
+            await ask(ws, action="PAUSE", robot="a")
+            server.robots[0].live.paused = True
+            server.snapshot(0)
+            assert fleet_of(server)["paused_by"] == "admin"
+            await ask(ws, action="RESUME", robot="a")
+            server.robots[0].live.paused = False
+            assert fleet_of(server)["paused_by"] is None
+    bridge(go)
+
+
+def test_the_model_says_who_is_driving():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await login(ws)
+            await ws.send(json.dumps({"action": "TELEOP", "robot": "a", "linear": 0.1, "angular": 0.0}))
+            await asyncio.sleep(0.05)
+            server.snapshot(0)
+            assert fleet_of(server)["driver"] == "admin"
+            await ws.send(json.dumps({"action": "TELEOP_RELEASE", "robot": "a"}))
+            await asyncio.sleep(0.05)
+            assert fleet_of(server)["driver"] is None
+            stop = [r for r in rows(audit, "command") if r["payload"].get("event") == "stop"]
+            assert stop[0]["payload"]["seconds"] == 0
+    bridge(go)
+
+
+def test_stop_all_progress_is_in_the_fleet_message():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await login(ws)
+            await ask(ws, action="OPERATOR_STOP_ALL")
+            server.snapshot(0)
+            assert server.fleet()["stop_all"]["robots"] == {"a": "sent"}
+            live = server.robots[0].live
+            live.stop_replied, live.stop_done_at = True, time.monotonic()
+            assert server.fleet()["stop_all"]["robots"] == {"a": "stopped"}
+            live.stop_sent_at = None  # something else was asked of it
+            assert server.fleet()["stop_all"] is None
+    bridge(go)
+
+
+def test_a_session_about_to_end_says_so_and_can_be_kept():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await login(ws)
+            now = [control.accounts.clock()]
+            control.accounts.clock = lambda: now[0]
+            now[0] += control.accounts.lifetime - 100
+            await control.session_notices()
+            while (notice := json.loads(await asyncio.wait_for(ws.recv(), 3)))["type"] != "session":
+                pass
+            assert 90 <= notice["ends_in"] <= 100
+            assert (await ask(ws, action="SESSION_KEEP"))["control"]["logged_in"]
+            now[0] += control.accounts.lifetime - 100
+            await control.session_notices()
+            now[0] += 200
+            await control.session_notices()
+            while (ended := json.loads(await asyncio.wait_for(ws.recv(), 3)))["type"] != "auth":
+                pass
+            assert not ended["control"]["logged_in"]
+    bridge(go)
+
+
+def test_the_user_list_says_who_is_online():
+    accounts = Accounts(None, env={})
+    accounts.add("olive", PASSWORD, "operator")
+    assert accounts.list()[0]["active"] is False
+    accounts.open_session("olive")
+    assert accounts.list()[0]["active"] is True

@@ -39,12 +39,13 @@ class AuditLog:
             self._db.execute("ALTER TABLE events ADD COLUMN user TEXT")
 
     def record(self, kind: str, *, client: str | None = None, user: str | None = None,
-               action: str | None = None, **detail) -> None:
+               action: str | None = None, **detail) -> int:
+        """Add a line; returns its id."""
         with self._lock:
-            self._db.execute(
+            return self._db.execute(
                 "INSERT INTO events (ts, kind, client, user, action, detail) VALUES (?, ?, ?, ?, ?, ?)",
                 (time.time(), kind, client, user, action, json.dumps(detail) if detail else None),
-            )
+            ).lastrowid
 
     def rows(self) -> list[tuple]:
         with self._lock:
@@ -53,17 +54,30 @@ class AuditLog:
             ).fetchall()
 
     def commands(self, robot: str | None = None, limit: int | None = None) -> list[dict]:
-        """Commands and rejections, oldest first: who, when, which robot, what."""
+        """Commands and rejections, oldest first: who, when, which robot, what, and how far each got.
+
+        The log is append-only, so a command's later steps are lines of their own (`command_step`),
+        folded in here. A rejection never reached the robot: its status is `refused`.
+        """
         with self._lock:
             rows = self._db.execute(
                 "SELECT id, ts, kind, client, user, action, detail FROM events "
-                "WHERE kind IN ('command', 'command_rejected') ORDER BY id").fetchall()
-        out = []
+                "WHERE kind IN ('command', 'command_rejected', 'command_step') ORDER BY id").fetchall()
+        out, steps = [], {}
         for id_, ts, kind, client, user, action, detail in rows:
             d = json.loads(detail) if detail else {}
-            if robot is None or d.get("robot") == robot:
+            if kind == "command_step":
+                steps.setdefault(d["ref"], []).append(d)
+            elif robot is None or d.get("robot") == robot:
                 out.append({"id": id_, "time": datetime.fromtimestamp(ts, timezone.utc).isoformat(), "kind": kind,
                             "client": client, "user": user, "command": action, **d})
+        for row in out:
+            if row["kind"] == "command_rejected":
+                row["status"] = "refused"
+            for step in steps.get(row["id"], ()):
+                row.update(status=step["status"], steps=step["steps"])
+                if step.get("reason"):
+                    row["reason"] = step["reason"]
         return out[-limit:] if limit else out
 
     def close(self) -> None:

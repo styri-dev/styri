@@ -4,7 +4,8 @@ Graph file (JSON):
     {"nodes": [{"id": "n1", "x": 0, "y": 0, "map_id": "floor1"}, ...],
      "edges": [{"id": "e1", "start": "n1", "end": "n2"}, ...]}
 
-Edges run both ways unless `"directed": true`. No ROS imports.
+Nodes may carry a `"name"` for people to read. Edges run both ways unless
+`"directed": true`. No ROS imports.
 """
 
 from __future__ import annotations
@@ -17,6 +18,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+ON_EDGE = 0.5  # metres: this close to an edge is on the graph
+
+
 class GraphError(ValueError):
     """The graph file can't be used. The message says why."""
 
@@ -27,6 +31,7 @@ class Node:
     x: float
     y: float
     map_id: str
+    name: str | None = None  # what people call it; the id is what the protocol uses
 
 
 @dataclass(frozen=True)
@@ -57,7 +62,8 @@ class Graph:
     @classmethod
     def from_dict(cls, data: object) -> "Graph":
         try:
-            nodes = [Node(str(n["id"]), float(n["x"]), float(n["y"]), str(n["map_id"])) for n in data["nodes"]]
+            nodes = [Node(str(n["id"]), float(n["x"]), float(n["y"]), str(n["map_id"]), str(n["name"]) if n.get("name") else None)
+                     for n in data["nodes"]]
             edges = [Edge(str(e["id"]), str(e["start"]), str(e["end"]), bool(e.get("directed", False)))
                      for e in data["edges"]]
         except (KeyError, TypeError, ValueError) as exc:
@@ -76,7 +82,8 @@ class Graph:
             raise GraphError(f"not valid JSON (line {exc.lineno})") from None
 
     def to_dict(self) -> dict:
-        return {"nodes": [{"id": n.id, "x": n.x, "y": n.y, "map_id": n.map_id} for n in self.nodes.values()],
+        return {"nodes": [{"id": n.id, "x": n.x, "y": n.y, "map_id": n.map_id, **({"name": n.name} if n.name else {})}
+                          for n in self.nodes.values()],
                 "edges": [{"id": e.id, "start": e.start, "end": e.end, **({"directed": True} if e.directed else {})}
                           for e in self.edges]}
 
@@ -98,6 +105,14 @@ class Graph:
             t = max(0.0, min(1.0, ((x - a.x) * dx + (y - a.y) * dy) / span)) if span else 0.0
             best = min(best, math.hypot(x - a.x - t * dx, y - a.y - t * dy))
         return best
+
+    def off_graph(self, x: float, y: float, limit: float) -> float | None:
+        """Metres from the route, for a point that's off every edge and more than `limit` from a node."""
+        near = self.nearest(x, y)
+        off = self.off_edges(x, y)
+        if near is None or not self.edges or off <= ON_EDGE or math.hypot(near.x - x, near.y - y) <= limit:
+            return None
+        return off
 
     def route(self, start: str, goal: str) -> tuple[list[Node], list[Edge]] | None:
         """Shortest path as (nodes, edges), or None if there's no way there."""

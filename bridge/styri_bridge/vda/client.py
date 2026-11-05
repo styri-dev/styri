@@ -21,7 +21,7 @@ import aiomqtt
 
 from ..mapping import Settings
 from ..model import RobotView, saw_motion
-from ..sitemap import Graph, to_site
+from ..sitemap import ON_EDGE, Graph, to_site
 from . import orders, schema
 
 logger = logging.getLogger("styri_bridge")
@@ -33,7 +33,6 @@ REPORT_AFTER = 5       # failed tries before saying so, when it was never connec
 STOP_RETRY = 1.0       # seconds between Operator stop retries, until the vehicle stands still
 STOP_GIVE_UP = 15.0    # seconds, then the panel says it isn't confirmed
 FACTSHEET_RETRY = 10.0  # seconds
-ON_EDGE = 0.5  # metres: this close to an edge is on the graph
 DEFAULT_VERSION = "2.1.0"
 NOT_A_FAULT = {"noOrderToCancel"}  # what a vehicle reports when Operator stop finds no order
 
@@ -74,6 +73,12 @@ class VdaClient:
         for v in self.vehicles.values():
             v.view.live.online = False
             v.view.monitor.discovered(list(TOPIC_TYPES.items()), lambda _t: True)
+
+    def status(self) -> dict:
+        """For the panel: is the broker there, and who's on it that styri.yaml doesn't list?"""
+        b = self.settings.broker
+        return {"connected": self.connected, "url": b.url or f"mqtt://{b.bind or '127.0.0.1'}:{b.port}",
+                "unconfigured": sorted(f"{m}/{s}" for m, s in self.unconfigured)}
 
     # ---- connection -----------------------------------------------------
 
@@ -223,6 +228,11 @@ class VdaClient:
             saw_motion(live, live.driving)
         live.last_node = msg.get("lastNodeId") or None
         live.route = [n["nodeId"] for n in msg.get("nodeStates", ())]
+        order = msg.get("orderId") or None
+        live.route_total = max(live.route_total, len(live.route)) if order == live.task_id else len(live.route)
+        live.mode = msg.get("operatingMode")
+        loads = [x["loadWeight"] for x in msg.get("loads", ()) if isinstance(x.get("loadWeight"), (int, float))]
+        live.load = sum(loads) if loads else None
         errors = [e for e in msg.get("errors", ()) if e.get("errorType") not in NOT_A_FAULT]
         live.errors = [{"type": e.get("errorType"), "level": e.get("errorLevel"),
                         "description": e.get("errorDescription", "")} for e in errors]
@@ -233,7 +243,6 @@ class VdaClient:
         if live.vehicle_stop:
             faults["Vehicle safety stop"] = (2, "active")
         monitor.faults(faults)
-        order = msg.get("orderId") or None
         running = bool(msg.get("nodeStates") or msg.get("edgeStates"))
         live.task_id = order
         if any(e.get("errorLevel") == "FATAL" for e in errors) and order:

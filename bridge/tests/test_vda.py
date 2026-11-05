@@ -420,3 +420,19 @@ def test_check_graph_and_control_lines(tmp_path):
     monitor.discovered([("/a/cmd_vel", "t"), ("/a/nav/_action/status", "t")], lambda _t: True)
     lines = control_lines(mapping.Settings(control=True), [robot], {"a": monitor}, "x", env={"STYRI_ADMIN_PASSWORD": "x"})
     assert all(passed for passed, _, _ in lines)
+
+
+def test_progress_counts_the_nodes_an_order_started_with():
+    c, view = client()
+    nodes = [{"nodeId": n, "sequenceId": i * 2, "released": True} for i, n in enumerate("abcd")]
+    feed(c, "state", state(orderId="o1", nodeStates=nodes))
+    feed(c, "state", state(orderId="o1", nodeStates=nodes[2:]))
+    assert (view.live.route_total, len(view.live.route)) == (4, 2)
+    feed(c, "state", state(orderId="o2", nodeStates=nodes[3:]))
+    assert view.live.route_total == 1
+
+
+def test_the_panel_hears_about_the_broker_and_who_else_is_on_it():
+    c, _ = client()
+    c.on_message("uagv/v2/moro/M8/state", b"{}")
+    assert c.status() == {"connected": False, "url": "mqtt://127.0.0.1:1883", "unconfigured": ["moro/M8"]}

@@ -1,11 +1,12 @@
 """The unified robot model, the v2 config and the robot cap."""
 
+import time
 from types import SimpleNamespace as NS
 
 import pytest
 
 from helpers import run_bridge
-from styri_bridge import mapping, model
+from styri_bridge import mapping, model, sitemap
 from styri_bridge.config import Config
 from styri_bridge.audit import AuditLog
 from styri_bridge.monitor import Monitor
@@ -274,3 +275,124 @@ def test_the_verdict_on_every_screen_comes_from_the_same_place():
     server.robots[0].live.online = False
     assert server.snapshot(0)["health"]["level"] == "unknown"
     assert server.fleet()["robots"][0]["verdict"] == "OFFLINE"
+
+
+# ---- command steps, for the panel and the log --------------------------------
+
+def snapshot_of(view):
+    return view.monitor.evaluate()
+
+
+def command(action, **over):
+    return model.Command(1, action, "m.lind", 0.0, 100.0, **over)
+
+
+def walk(view, now=100.0):
+    step = model.next_step(view, now)
+    if step:
+        model.advance(view.live.command, *step)
+    return view.live.command
+
+
+def test_a_vda_order_goes_sent_accepted_running_done():
+    v = robot_view()
+    v.live.command = command("GOAL", order="o1", node="n3")
+    assert walk(v).status == "sent"
+    v.live.task_id, v.live.task_state = "o1", "active"
+    assert walk(v).status == "running"
+    assert v.live.command.steps == ["sent", "accepted", "running"]
+    v.live.task_state = "done"
+    assert walk(v).status == "done"
+    assert model.next_step(v, 1000.0) is None  # the end is the end
+
+
+def test_a_ros_goal_counts_once_a_new_goal_shows_up():
+    v = robot_view()
+    v.live.task_id, v.live.task_state = "old", "done"
+    v.live.command = command("GOAL", before="old", point=(1, 2))
+    assert walk(v).status == "sent"
+    v.live.task_id, v.live.task_state = "new", "active"
+    assert walk(v).status == "running"
+    v.live.task_state = "idle"
+    assert walk(v).status == "cancelled"
+
+
+def test_nav2_turning_a_goal_down_is_rejected():
+    v = robot_view()
+    v.live.command = command("GOAL")
+    v.live.goal_rejected = True
+    assert walk(v).status == "rejected"
+
+
+def test_a_vehicle_refusing_an_order_is_rejected_with_its_words():
+    v = robot_view()
+    v.live.command = command("GOAL", order="o1")
+    v.live.errors = [{"type": "noRouteError", "level": "WARNING", "description": "B2 is not in its map"}]
+    cmd = walk(v)
+    assert (cmd.status, cmd.reason) == ("rejected", "Robot rejected the order: B2 is not in its map")
+
+
+def test_a_fatal_error_fails_the_order_with_its_words():
+    v = robot_view()
+    v.live.task_id, v.live.task_state = "o1", "failed"
+    v.live.errors = [{"type": "motor", "level": "FATAL", "description": "motor fault"}]
+    v.live.command = command("GOAL", order="o1")
+    cmd = walk(v)
+    assert (cmd.status, cmd.reason) == ("failed", "Robot aborted the order: motor fault")
+
+
+def test_silence_after_a_command_is_not_confirmed_not_done():
+    v = robot_view()
+    v.live.command = command("GOAL", order="o1")
+    assert walk(v, 100.0 + model.COMMAND_WAIT - 1).status == "sent"
+    assert walk(v, 100.0 + model.COMMAND_WAIT).status == "not_confirmed"
+
+
+def test_pause_is_done_when_the_robot_says_so():
+    v = robot_view()
+    v.live.command = command("PAUSE")
+    assert walk(v).status == "sent"
+    v.live.paused = True
+    cmd = walk(v)
+    assert cmd.status == "done" and cmd.steps == ["sent", "accepted", "running", "done"]
+
+
+def test_a_stop_ends_in_its_own_words():
+    v = robot_view(odom="/odom")
+    model.stop_sent(v.live)
+    v.live.command = command("OPERATOR_STOP")
+    model.saw_motion(v.live, False)
+    assert walk(v, time.monotonic()).status == "stopped"
+
+
+def test_the_model_says_who_paused_it_and_only_while_paused():
+    v = robot_view()
+    v.live.paused_by = "j.okafor"
+    snap = snapshot_of(v)
+    assert model.describe(v, snap)["paused_by"] is None
+    v.live.paused = True
+    assert model.describe(v, snap)["paused_by"] == "j.okafor"
+
+
+def test_a_stop_says_when_it_stopped():
+    v = robot_view(odom="/odom")
+    model.stop_sent(v.live)
+    assert model.describe(v, snapshot_of(v))["stop_at"] is None
+    model.saw_motion(v.live, False)
+    assert abs(model.describe(v, snapshot_of(v))["stop_at"] - time.time()) < 5
+
+
+def test_a_vehicle_off_the_graph_says_how_far():
+    graph = sitemap.Graph([sitemap.Node("a", 0, 0, "m"), sitemap.Node("b", 10, 0, "m")], [sitemap.Edge("e", "a", "b")])
+    link = NS(protocol="vda5050")
+    v = NS(map=NS(link=link))
+    assert model.off_graph(v, {"x": 5, "y": 0.2}, graph, 2.0) is None  # on the edge
+    assert model.off_graph(v, {"x": 0, "y": 1.0}, graph, 2.0) is None  # near a node
+    assert model.off_graph(v, {"x": 5, "y": 3.4}, graph, 2.0) == 3.4
+    assert model.off_graph(NS(map=NS(link=NS(protocol="ros2"))), {"x": 5, "y": 3.4}, graph, 2.0) is None
+
+
+def test_node_names_and_one_way_edges_survive_a_save():
+    data = {"nodes": [{"id": "n1", "x": 0, "y": 0, "map_id": "m", "name": "Dock 1"}, {"id": "n2", "x": 1, "y": 0, "map_id": "m"}],
+            "edges": [{"id": "e1", "start": "n1", "end": "n2", "directed": True}]}
+    assert sitemap.Graph.from_dict(data).to_dict() == data

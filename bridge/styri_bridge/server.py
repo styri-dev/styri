@@ -143,6 +143,8 @@ class BridgeServer:
         self.on_connect: list[Callable[[Session], None]] = []
         self.on_disconnect: list[Callable[[Session], None]] = []
         self.on_ros_node: list[Callable[[RobotView, object], None]] = []  # before the node spins
+        self.on_fleet: list[Callable[[], None]] = []  # before each fleet message
+        self.stop_all_run: dict | None = None  # the last Stop all, while it's worth showing
         self.background: list[Callable[[], Awaitable[None]]] = []
         self.on_shutdown: list[Callable[[], None]] = []
 
@@ -269,9 +271,25 @@ class BridgeServer:
     def fleet(self) -> dict:
         """Every shown robot's model, from the latest snapshots."""
         self._log_stops()
-        return {"type": "fleet", "site": self.cfg.mapping.settings.site_name, "not_shown": self.not_shown,
-                "robots": [model.describe(r, self._snapshots[r.index]) for r in self.robots
-                           if r.index in self._snapshots]}
+        for hook in self.on_fleet:
+            hook()
+        settings = self.cfg.mapping.settings
+        return {"type": "fleet", "site": settings.site_name, "not_shown": self.not_shown,
+                "broker": self.vda.status() if self.vda is not None else None, "stop_all": self._stop_all_progress(),
+                "robots": [model.describe(r, self._snapshots[r.index], self.site.graph, settings.max_off_graph)
+                           for r in self.robots if r.index in self._snapshots]}
+
+    def _stop_all_progress(self) -> dict | None:
+        """Each robot's stop, for the Stop all banner. A status that has timed out stays as it ended."""
+        run = self.stop_all_run
+        if run is None:
+            return None
+        now = {r.name: model.stop_status(r) for r in self.robots if r.name in run["robots"]}
+        if not any(now.values()):
+            self.stop_all_run = None
+            return None
+        run["robots"].update({name: status for name, status in now.items() if status})
+        return {"id": run["id"], "robots": run["robots"]}
 
     @property
     def _snapshot(self) -> dict | None:
