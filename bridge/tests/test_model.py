@@ -88,7 +88,7 @@ def test_a_bad_file_leaves_control_off(tmp_path):
 
 
 def four_robots():
-    robots, _ = mapping.from_dict({"robots": [{"name": f"r{i}", "namespace": f"/r{i}"} for i in range(4)]}, {})
+    robots, _ = mapping.from_dict({"robots": [{"name": f"r{i}", "namespace": f"/r{i}", "odom": "odom"} for i in range(4)]}, {})
     return Config(audit_db=":memory:", ui_dir=None, mapping=mapping.Loaded(tuple(robots), "test"))
 
 
@@ -125,7 +125,7 @@ def view(link):
 
 
 def test_ros_capabilities_come_from_the_config():
-    caps = model.capabilities(mapping.RobotMap("x", link=mapping.Link(cmd_vel="/v")), model.Live())
+    caps = model.capabilities(mapping.RobotMap("x", link=mapping.Link(cmd_vel="/v", odom="/o")), model.Live())
     assert caps == {"can_teleop": True, "can_waypoint": False, "can_pause": False, "can_cancel": False, "can_stop": True}
     caps = model.capabilities(mapping.RobotMap("x"), model.Live())
     assert not any(caps.values())
@@ -184,18 +184,93 @@ def test_pose_tf_in_the_file_taps_both_topics():
     assert {"/a/tf", "/a/tf_static"} <= set(server.robots[0].monitor.taps)
 
 
-def test_a_ros_stop_is_confirmed_by_odom():
-    live = model.Live(driving=True, stop="stopping")
-    moving = NS(twist=NS(twist=NS(linear=NS(x=0.3), angular=NS(z=0))))
-    still = NS(twist=NS(twist=NS(linear=NS(x=0.0), angular=NS(z=0))))
-    model.ros_odom(live, moving)
-    assert live.stop == "stopping"
-    model.ros_odom(live, still)
-    assert live.stop is None
+def robot_view(**link):
+    return model.RobotView(0, "x", "0", Monitor(Quiet(), mapping.RobotMap("x", link=mapping.Link(**link))))
+
+
+def test_a_stop_goes_sent_then_stopped():
+    v = robot_view(cmd_vel="/v", odom="/o")
+    assert model.stop_status(v) is None
+    model.stop_sent(v.live)
+    t = v.live.stop_sent_at
+    assert model.stop_status(v, t + 1) == "sent"
+    model.saw_motion(v.live, True)
+    assert model.stop_status(v, t + 5) == "sent"
+    model.saw_motion(v.live, False)
+    assert model.stop_status(v) == "stopped"
+    assert model.stop_status(v, v.live.stop_done_at + 31) is None
+
+
+def test_silence_and_still_moving_are_different_messages():
+    v = robot_view(cmd_vel="/v", odom="/o")
+    model.stop_sent(v.live)
+    t = v.live.stop_sent_at
+    assert model.stop_status(v, t + 2.9) == "sent"
+    assert model.stop_status(v, t + 3.1) == "no_reply"
+    model.saw_motion(v.live, True)  # it answered, moving
+    assert model.stop_status(v, t + 14.9) == "sent"
+    assert model.stop_status(v, t + 15.1) == "not_confirmed"
+    model.saw_motion(v.live, False)
+    assert model.stop_status(v, t + 16) == "stopped"
+
+
+def test_a_stop_leaves_the_robots_health_alone():
+    v = robot_view(cmd_vel="/v", odom="/o")
+    model.stop_sent(v.live)
+    model.saw_motion(v.live, True)
+    v.live.stop_sent_at -= 20
+    snap = {"health": {"level": "ok", "line": "All systems normal."}}
+    model.overlay_health(v, snap)
+    assert model.stop_status(v) == "not_confirmed" and snap["health"]["level"] == "ok"
+
+
+def test_no_speed_feedback_means_stop_only():
+    link = dict(cmd_vel="/v", nav2_action="/n", pause_topic="/p")
+    caps = model.capabilities(mapping.RobotMap("x", link=mapping.Link(**link)), model.Live())
+    assert caps == {"can_teleop": False, "can_waypoint": False, "can_pause": False, "can_cancel": False, "can_stop": True}
+    v = robot_view(**link)
+    model.stop_sent(v.live)
+    assert model.stop_status(v) == "cant_confirm"
+    assert model.capabilities(mapping.RobotMap("x", link=mapping.Link(velocity="/t", **link)), model.Live())["can_teleop"]
+
+
+def test_a_velocity_topic_confirms_a_stop():
+    v = robot_view(cmd_vel="/v", velocity="/t")
+    model.stop_sent(v.live)
+    model.ros_velocity(v.live, NS(linear=NS(x=0.0), angular=NS(z=0.0)))
+    assert model.stop_status(v) == "stopped"
+    model.ros_velocity(v.live, NS(twist=NS(linear=NS(x=0.4), angular=NS(z=0.0))))  # TwistStamped
+    assert v.live.driving
+
+
+def test_a_new_command_clears_the_last_stop():
+    v = robot_view(cmd_vel="/v", odom="/o")
+    model.stop_sent(v.live)
+    model.stop_over(v.live)
+    assert model.stop_status(v) is None
+
+
+def test_each_end_of_a_stop_is_logged_once():
+    class Log(Quiet):
+        msgs = []
+
+        def add(self, kind, msg, source):
+            self.msgs.append(msg)
+
+    server = BridgeServer(four_robots(), AuditLog(":memory:"))
+    r = server.robots[0]
+    r.monitor.activity = Log()
+    server.snapshot(0)
+    model.stop_sent(r.live)
+    model.saw_motion(r.live, True)
+    r.live.stop_sent_at -= 20
+    server.fleet()
+    server.fleet()
+    assert Log.msgs.count("Stop NOT confirmed: still moving") == 1
 
 
 def test_the_verdict_on_every_screen_comes_from_the_same_place():
     server = BridgeServer(four_robots(), AuditLog(":memory:"))
     server.robots[0].live.online = False
     assert server.snapshot(0)["health"]["level"] == "unknown"
-    assert server.fleet()["robots"][0]["verdict"] == "NO DATA"
+    assert server.fleet()["robots"][0]["verdict"] == "OFFLINE"

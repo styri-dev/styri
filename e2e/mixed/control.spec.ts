@@ -109,18 +109,18 @@ test("the demo's map editor saves out of the box", async ({ page }) => {
   await expect(page.locator("[data-node]")).toHaveCount(before + 1);
 });
 
-test("an offline robot says NO DATA on every screen, never OK", async ({ page }) => {
+test("an offline robot says OFFLINE on every screen, never OK", async ({ page }) => {
   execSync("docker compose stop -t 1 agv-08", { cwd: DEMO, stdio: "ignore" });
   await page.goto("/#fleet");
   const tile = page.locator('button[data-robot="agv-08"]');
   await expect(tile).toHaveAttribute("data-health", "unknown", { timeout: 15_000 });
-  await expect(tile).toContainText("NO DATA");
+  await expect(tile).toContainText("OFFLINE");
   await expect(tile).toContainText("This robot is offline.");
   await tile.click();
   await expect(page.locator(".hero")).toHaveAttribute("data-health", "unknown");
 });
 
-test("a robot that won't stop: FAULT and a clear warning, on its own page, with no login", async ({ page }) => {
+test("a robot that won't stop: its health stays, the stop line says so, the card turns red", async ({ page }) => {
   execSync("docker compose stop -t 1 agv-07", { cwd: DEMO, stdio: "ignore" });
   const fake = spawn("docker", ["compose", "exec", "-T", "styri", "/ros_entrypoint.sh", "python3", "-"],
     { cwd: DEMO, stdio: ["pipe", "ignore", "ignore"] });
@@ -129,11 +129,19 @@ test("a robot that won't stop: FAULT and a clear warning, on its own page, with 
   await expect(page.getByTestId("task-state").nth(1)).toHaveText("active", { timeout: 10_000 });
   await page.locator('button[data-robot="agv-07"]').click();
   await page.getByTestId("operator-stop").click();
-  await expect(page.getByTestId("stop-status")).toContainText("Operator stop sent");
-  await expect(page.getByTestId("stop-status")).toContainText("not confirmed", { timeout: 20_000 });
-  await expect(page.locator(".hero")).toHaveAttribute("data-health", "fault");
-  await expect(page.locator(".hero")).toContainText("Operator stop not confirmed");
+  await expect(page.getByTestId("stop-status")).toHaveText("Stop sent…");
+  await expect(page.getByTestId("stop-status")).toHaveText("Stop NOT confirmed: still moving", { timeout: 20_000 });
+  await expect(page.locator(".hero")).toHaveAttribute("data-health", "ok"); // health is health
+  await expect(page.getByTestId("control-drawer")).toHaveClass(/is-stop-failed/);
   fake.kill();
+});
+
+test("a stop that works says Stopped, and the card stays as it was", async ({ page }) => {
+  await page.goto("/#fleet");
+  await page.locator('button[data-robot="agv-08"]').click();
+  await page.getByTestId("operator-stop").click();
+  await expect(page.getByTestId("stop-status")).toHaveText("Stopped", { timeout: 10_000 });
+  await expect(page.getByTestId("control-drawer")).not.toHaveClass(/is-stop-failed/);
 });
 
 test("Stop all: a tap does nothing, a one-second hold stops the fleet", async ({ page }) => {

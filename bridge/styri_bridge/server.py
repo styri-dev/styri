@@ -214,6 +214,8 @@ class BridgeServer:
             taps[link.pose] = lambda msg: model.ros_pose(live, msg)
         if link.odom:
             taps[link.odom] = lambda msg: model.ros_odom(live, msg)
+        if link.velocity:
+            taps[link.velocity] = lambda msg: model.ros_velocity(live, msg)
         if link.nav2_status():
             taps[link.nav2_status()] = lambda msg: model.nav2_status(live, msg)
 
@@ -246,8 +248,20 @@ class BridgeServer:
         self._snapshots[index] = snap
         return snap
 
+    def _log_stops(self) -> None:
+        """Say how each stop ended, once."""
+        words = {"no_reply": ("warning", "No reply from robot after Operator stop"),
+                 "not_confirmed": ("warning", "Stop NOT confirmed: still moving"),
+                 "stopped": ("state", "Stopped")}
+        for r in self.robots:
+            status = model.stop_status(r)
+            if status != r.stop_logged and status in words:
+                r.monitor.activity.add(*words[status], "control")
+            r.stop_logged = status
+
     def fleet(self) -> dict:
         """Every shown robot's model, from the latest snapshots."""
+        self._log_stops()
         return {"type": "fleet", "site": self.cfg.mapping.settings.site_name, "not_shown": self.not_shown,
                 "robots": [model.describe(r, self._snapshots[r.index]) for r in self.robots
                            if r.index in self._snapshots]}

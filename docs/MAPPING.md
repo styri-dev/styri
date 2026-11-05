@@ -249,7 +249,7 @@ robots:
     nav2_action: /amr01/navigate_to_pose
     pause_topic: /amr01/pause        # optional std_msgs/Bool; without it, no Pause button
     pose: /amr01/amcl_pose           # or `tf`: map to base_link from /tf
-    odom: /amr01/odom                # optional: speed readout
+    odom: /amr01/odom                # speed feedback; or `velocity:`, a Twist or TwistStamped topic
     max_linear: 0.5                  # m/s, enforced in the bridge
     max_angular: 1.0                 # rad/s
     points:                          # saved waypoints, on the site map
@@ -271,6 +271,10 @@ An entry also takes everything a single robot does (`battery:`, `status:`,
 `cmd_vel`, `nav2_action` and `pause_topic`, and each VDA robot's
 `instant_actions` (default `startPause`, `stopPause`, `cancelOrder`,
 `factsheetRequest`). Anything else is refused in the bridge and logged.
+
+**Speed feedback.** A ROS 2 robot needs `odom` or `velocity` to drive or take goals.
+That's how Styri confirms a stop. Without one it gets Operator stop only, and
+`styri check` warns.
 
 **VDA 5050 robots** are read from their `state` message: battery, errors, pose
 and order progress. Versions 2.0 and 2.1 are supported, and Styri speaks whichever

@@ -46,6 +46,7 @@ class Sink:
 
 FILE = {"control": {"enabled": True}, "robots": [
     {"name": "a", "namespace": "/a", "cmd_vel": "/a/cmd_vel", "nav2_action": "/a/nav", "pause_topic": "/a/pause",
+     "odom": "/a/odom",
      "max_linear": 0.5, "max_angular": 1.0, "points": [{"name": "dock", "x": 1, "y": 2}]},
     {"name": "b", "namespace": "/b"},  # view only: nothing whitelisted
 ]}

@@ -273,33 +273,17 @@ def health(view):
     return snap["health"]
 
 
-def test_a_stop_that_is_not_confirmed_is_a_fault_until_the_robot_stands_still(monkeypatch):
-    monkeypatch.setattr("styri_bridge.vda.client.STOP_RETRY", 0.01)
-    monkeypatch.setattr("styri_bridge.vda.client.STOP_GIVE_UP", 0.05)
-
-    async def go():
-        c, view = client()
-        feed(c, "state", state(driving=True, orderId="o1"))
-        await c.operator_stop(view)
-        assert view.live.stop == "stopping"
-        assert health(view) == {"level": "warn", "line": "Operator stop sent. Waiting for this robot to stop."}
-        await asyncio.sleep(0.15)
-        assert view.live.stop == "unconfirmed"
-        assert health(view) == {"level": "fault", "line": "Operator stop not confirmed: this robot still reports driving."}
-        feed(c, "state", state(driving=True, orderId="o1"))
-        assert view.live.stop == "unconfirmed"  # still driving: it stays
-        feed(c, "state", state(driving=False, orderId="o1"))
-        assert view.live.stop is None and health(view)["level"] == "ok"
-    asyncio.run(go())
-
-
-def test_a_stop_on_a_standing_robot_has_nothing_to_confirm():
-    async def go():
-        c, view = client()
-        feed(c, "state", state(driving=False))
-        await c.operator_stop(view)
-        assert view.live.stop is None
-    asyncio.run(go())
+def test_state_messages_confirm_a_stop():
+    from styri_bridge.model import stop_sent, stop_status
+    c, view = client()
+    feed(c, "state", state(driving=True))
+    stop_sent(view.live)
+    t = view.live.stop_sent_at
+    assert stop_status(view, t + 4) == "no_reply"
+    feed(c, "state", state(driving=True))
+    assert stop_status(view, t + 4) == "sent"
+    feed(c, "state", state(driving=False))
+    assert stop_status(view) == "stopped" and health(view)["level"] == "ok"
 
 
 def test_an_offline_robot_never_says_ok():
@@ -405,6 +389,17 @@ def test_check_lines_for_a_good_and_a_silent_vehicle():
     assert ok == {"Connection": True, "State": True, "Schema": False, "Factsheet": True}  # that factsheet is invalid
 
 
+def test_check_warns_about_a_robot_with_no_speed_feedback():
+    from styri_bridge.check import control_lines, show
+    robot = mapping.RobotMap("a", link=mapping.Link(cmd_vel="/a/cmd_vel"))
+    monitor = Monitor(Log(), robot)
+    monitor.discovered([("/a/cmd_vel", "t")], lambda _t: True)
+    lines = control_lines(mapping.Settings(control=True), [robot], {"a": monitor}, "x", env={"STYRI_ADMIN_PASSWORD": "x"})
+    printed = []
+    assert show(lines, printed.append) == 0  # a warning isn't a failure
+    assert any(line.strip().startswith("WARN") and "Operator stop only" in line for line in printed)
+
+
 def test_check_graph_and_control_lines(tmp_path):
     from styri_bridge.check import control_lines, graph_lines
     path = tmp_path / "graph.json"
@@ -414,7 +409,7 @@ def test_check_graph_and_control_lines(tmp_path):
     assert not graph_lines(str(path), {"other"})[0][1][0]
     assert not graph_lines(str(tmp_path / "nope.json"), set())[0][0][0]
 
-    robot = mapping.RobotMap("a", link=mapping.Link(cmd_vel="/a/cmd_vel", nav2_action="/a/nav"))
+    robot = mapping.RobotMap("a", link=mapping.Link(cmd_vel="/a/cmd_vel", nav2_action="/a/nav", odom="/a/odom"))
     monitor = Monitor(Log(), robot)
     monitor.discovered([("/a/cmd_vell", "t")], lambda _t: True)
     lines = control_lines(mapping.Settings(control=True), [robot], {"a": monitor}, str(tmp_path / "x.db"), env={})

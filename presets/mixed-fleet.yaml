@@ -19,6 +19,7 @@ robots:
     cmd_vel: /amr01/cmd_vel
     nav2_action: /amr01/navigate_to_pose
     pose: /amr01/amcl_pose
+    odom: /amr01/odom
     max_linear: 0.5
     max_angular: 1.0
   - name: agv-07

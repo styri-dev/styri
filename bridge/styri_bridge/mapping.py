@@ -60,6 +60,7 @@ CUSTOM_STALE_AFTER = 3.0
 SECTIONS = {"robot", "battery", "status", "cpu_temperature", "diagnostics", "fields", "stale_after"}
 SITE_SECTIONS = {"site", "control", "vda"}  # the whole file's, never one robot's
 ROBOT_KEYS = {"name", "protocol", "namespace", "domain_id", "vendor", "model", "cmd_vel", "nav2_action", "pose", "odom",
+              "velocity",
               "pause_topic", "max_linear", "max_angular", "manufacturer", "serial", "username", "password_env",
               "map_offset", "instant_actions", "points"}
 PROTOCOLS = ("ros2", "vda5050")
@@ -137,6 +138,7 @@ class Link:
     pose: str | None = None
     pose_tf: bool = False  # `pose: tf`: map to base_link from /tf, not a pose topic
     odom: str | None = None
+    velocity: str | None = None  # a Twist or TwistStamped topic, for a robot with no Odometry
     max_linear: float = 0.5   # m/s
     max_angular: float = 1.0  # rad/s
     # VDA 5050.
@@ -500,14 +502,14 @@ def _link(data: dict, where: str, problems: list[str], namespace: str) -> Link:
     common = dict(protocol=protocol, vendor=r.str("vendor"), model=r.str("model"), max_linear=limits[0],
                   max_angular=limits[1], points=_points(data.get("points"), f"{where}points", problems),
                   map_offset=(offset.num("x", 0.0), offset.num("y", 0.0), offset.num("theta", 0.0)))
-    ros_only = [k for k in ("cmd_vel", "nav2_action", "pause_topic", "pose", "odom") if r.has(k)]
+    ros_only = [k for k in ("cmd_vel", "nav2_action", "pause_topic", "pose", "odom", "velocity") if r.has(k)]
     vda_only = [k for k in ("manufacturer", "serial", "username", "password_env", "instant_actions") if r.has(k)]
     if protocol == "ros2":
         for k in vda_only:
             problems.append(f"{where}{k}: only for protocol: vda5050")
         return Link(**common, cmd_vel=topic("cmd_vel"), nav2_action=topic("nav2_action"),
                     pause_topic=topic("pause_topic"), pose=topic("pose"), pose_tf=data.get("pose") == "tf",
-                    odom=topic("odom"))
+                    odom=topic("odom"), velocity=topic("velocity"))
     for k in ros_only:
         problems.append(f"{where}{k}: only for protocol: ros2")
     for k in ("manufacturer", "serial"):

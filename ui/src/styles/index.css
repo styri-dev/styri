@@ -358,9 +358,10 @@ button { font: inherit; }
 .detail { padding-top: 0; }
 .drawer { display: flex; flex-wrap: wrap; gap: var(--sp-5); padding: var(--sp-5); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-3); }
 .drawer--locked { align-items: center; }
-.stopstatus { margin: 0; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-2); font-weight: 700; }
-.stopstatus--stopping { background: var(--caution-500); color: var(--g-950); }
-.stopstatus--unconfirmed { background: var(--stop-500); color: var(--white); }
+.stopline { font-weight: 700; font-size: var(--fs-sm); }
+.stopline--stopped { color: var(--ok-500); }
+.stopline--not_confirmed, .stopline--no_reply { color: var(--white); }
+.is-stop-failed { background: var(--stop-500); border-color: var(--stop-500); color: var(--white); }
 .ftile__facts dd[data-testid="last-seen"] { white-space: normal; }
 .ftile__word { white-space: nowrap; }
 .ftile--unknown .ftile__word { font-size: var(--fs-lg); }

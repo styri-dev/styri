@@ -4,6 +4,17 @@ import type { RobotModel } from "../bridge";
 import { num } from "../format";
 import { SOFTWARE_STOP } from "./Header";
 
+export const STOP_WORDS = {
+  sent: "Stop sent…",
+  stopped: "Stopped",
+  no_reply: "No reply from robot",
+  not_confirmed: "Stop NOT confirmed: still moving",
+  cant_confirm: "Stop sent · can't confirm: no speed feedback configured",
+} as const;
+
+/** The only stop states that tint a card red. Health stays what it is. */
+export const stopFailed = (robot?: RobotModel) => robot?.stop === "not_confirmed" || robot?.stop === "no_reply";
+
 const SEND_EVERY_MS = 66; // 15 Hz, inside the bridge's 300 ms watchdog gap
 const PAD = 200;
 const KEYS: Record<string, [number, number]> = {
@@ -119,21 +130,14 @@ export function ControlDrawer({ ctx, robot, onLogin }: { ctx: PanelContext; robo
     <div className="drawer__stop">
       <button type="button" className="opstop" data-testid="operator-stop" onClick={() => send("OPERATOR_STOP")}>Operator stop</button>
       <span className="small strong center">{SOFTWARE_STOP}</span>
+      {robot.stop && <span className={`stopline stopline--${robot.stop}`} role="status" data-testid="stop-status">{STOP_WORDS[robot.stop]}</span>}
     </div>
-  );
-  const stopStatus = robot.stop && (
-    <p className={`stopstatus stopstatus--${robot.stop}`} role="alert" data-testid="stop-status">
-      {robot.stop === "unconfirmed"
-        ? "Operator stop not confirmed: this robot still reports driving. Check it now, and use its own stop if it's moving."
-        : "Operator stop sent. Waiting for this robot to stop."}
-    </p>
   );
   if (!control.logged_in) {
     // Stopping needs no login, unless the site says so. Undoing one always does.
     return (
-      <section className="drawer drawer--locked" data-testid="control-drawer">
+      <section className={`drawer drawer--locked ${stopFailed(robot) ? "is-stop-failed" : ""}`} data-testid="control-drawer">
         <div className="drawer__main">
-          {stopStatus}
           <button type="button" className="btn btn--solid" onClick={onLogin}>Log in to control robots</button>
         </div>
         {!control.stop_requires_login && stopButton}
@@ -144,9 +148,8 @@ export function ControlDrawer({ ctx, robot, onLogin }: { ctx: PanelContext; robo
   const stale = robot.stale;
   const active = robot.task.state === "active" || robot.task.state === "paused";
   return (
-    <section className="drawer" data-testid="control-drawer" aria-label={`Control ${robot.name}`}>
+    <section className={`drawer ${stopFailed(robot) ? "is-stop-failed" : ""}`} data-testid="control-drawer" aria-label={`Control ${robot.name}`}>
       <div className="drawer__main">
-        {stopStatus}
         {stale && <p className="warn-fg strong small" role="alert">Data is STALE: driving and waypoints are off. Operator stop stays available.</p>}
         {robot.warnings.map((w) => <p key={w} className="warn-fg small" role="status">{w}</p>)}
         {notice && <p className="warn-fg small" role="alert" data-testid="notice">{notice.text}</p>}

@@ -1,12 +1,13 @@
 import type { PanelContext } from "../App";
 import type { Health, NotShown, RobotModel } from "../bridge";
+import { STOP_WORDS, stopFailed } from "../control/ControlDrawer";
 import { ageText, num } from "../format";
 
 const WORD: Record<Health, { glyph: string; word: string }> = {
   ok: { glyph: "✓", word: "OK" },
   warn: { glyph: "▲", word: "WARNING" },
   fault: { glyph: "✕", word: "FAULT" },
-  unknown: { glyph: "?", word: "NO DATA" },
+  unknown: { glyph: "⊘", word: "OFFLINE" },
 };
 
 export const PROTOCOL = { ros2: "ROS 2", vda5050: "VDA 5050" } as const;
@@ -18,19 +19,21 @@ export function levelOf(r?: RobotModel): Health {
 function RobotTile({ index, name, r, ctx }: { index: number; name: string; r?: RobotModel; ctx: PanelContext }) {
   const disc = ctx.state.conn !== "open";
   const level = disc ? "unknown" : levelOf(r);
+  const word = disc ? "NO DATA" : WORD[level].word; // the bridge is lost, not the robot
   const line = !r ? "Waiting for the first update…" : disc ? "No data from the bridge." : r.reason;
   const age = r?.last_seen == null ? null : Math.max(0, ctx.now / 1000 - r.last_seen);
   const stale = disc || !!r?.stale;
   return (
-    <button type="button" className={`ftile ftile--${level}`} data-robot={name} data-health={level}
-      onClick={() => ctx.setRobot(index, "overview")} aria-label={`${name}: ${WORD[level].word}. Open its detail.`}>
+    <button type="button" className={`ftile ftile--${level} ${stopFailed(r) ? "is-stop-failed" : ""}`} data-robot={name} data-health={level}
+      onClick={() => ctx.setRobot(index, "overview")} aria-label={`${name}: ${word}. Open its detail.`}>
       <div className="ftile__head">
         <span className={`ftile__glyph ftile__glyph--${level}`}>{WORD[level].glyph}</span>
-        <span className="ftile__word">{WORD[level].word}</span>
+        <span className="ftile__word">{word}</span>
         <span className="mono ftile__name ellipsis">{name}</span>
       </div>
       {r && <span className="badge-protocol" data-protocol={r.protocol}>{PROTOCOL[r.protocol]}</span>}
       <p className="ftile__line">{line}</p>
+      {r?.stop && <span className={`stopline stopline--${r.stop}`}>{STOP_WORDS[r.stop]}</span>}
       <dl className="ftile__facts">
         <div>
           <dt>Battery</dt>

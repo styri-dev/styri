@@ -6,7 +6,7 @@ const HERO: Record<Health, { glyph: string; word: string }> = {
   ok: { glyph: "✓", word: "OK" },
   warn: { glyph: "▲", word: "WARNING" },
   fault: { glyph: "✕", word: "FAULT" },
-  unknown: { glyph: "?", word: "NO DATA" },
+  unknown: { glyph: "⊘", word: "OFFLINE" },
 };
 
 interface TileProps {
@@ -132,8 +132,8 @@ export function Overview(props: {
     <div className={`page ${disc ? "is-dim" : ""}`}>
       <section className={`hero hero--${level}`} aria-live="polite" data-health={level}>
         <div className="hero__mark">
-          <span className="hero__glyph">{HERO[level].glyph}</span>
-          <span className="hero__word">{HERO[level].word}</span>
+          <span className="hero__glyph">{disc ? "?" : HERO[level].glyph}</span>
+          <span className="hero__word">{disc ? "NO DATA" : HERO[level].word}</span>
         </div>
         <div className="hero__text">
           <span className="hero__line">{line}</span>

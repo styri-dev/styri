@@ -21,7 +21,7 @@ from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from ..model import RobotView, capabilities, is_stale
+from ..model import RobotView, capabilities, is_stale, stop_over, stop_sent
 from ..server import MAX_MESSAGE, MAX_MESSAGE_LOGGED_IN, BridgeServer, Session, peer_ip
 from ..sitemap import Graph, GraphError
 from . import commands
@@ -303,11 +303,14 @@ class Control:
     async def _send(self, view: RobotView, action: str, data: dict) -> dict:
         sink = self._sink(view)
         if action == "GOAL":
-            return await self._goal(view, sink, commands.goal(data))
+            sent = await self._goal(view, sink, commands.goal(data))
+            stop_over(view.live)
+            return sent
         if action == "PAUSE":
             await sink.pause(view)
         elif action == "RESUME":
             await sink.resume(view)
+            stop_over(view.live)
         elif action == "CANCEL":
             await sink.cancel(view)
         elif action == "OPERATOR_STOP":
@@ -333,6 +336,7 @@ class Control:
         self.stopping.add(view.index)
         asyncio.get_running_loop().call_later(2.0, self.stopping.discard, view.index)
         self.teleop.release(view.index, "operator_stop")
+        stop_sent(view.live)
         await sink.operator_stop(view)
 
     def _drive(self, session: Session, view: RobotView, data: dict, payload: dict) -> dict | None:
@@ -347,6 +351,7 @@ class Control:
                                  lambda reason: self._drive_ended(session, view, reason)):
             raise Refused(OTHER_DRIVER)
         if started:
+            stop_over(view.live)
             self.audit.record("command", client=session.client, user=ADMIN, action="TELEOP", robot=view.id,
                               payload={"event": "start", "limits": [link.max_linear, link.max_angular]})
         return None  # streams at 10-20 Hz: no reply per message

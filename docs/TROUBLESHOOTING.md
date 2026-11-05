@@ -125,8 +125,8 @@ that isn't in `styri.yaml`.
   The first one went through.
 - **Too many attempts.** Five wrong passwords lock that address out for a minute.
 - **Buttons missing.** The panel shows only what a robot supports: a ROS 2 robot
-  needs `cmd_vel` for the joystick, `nav2_action` for waypoints and Cancel, and
-  `pause_topic` for Pause. A VDA 5050 factsheet can rule actions out.
+  needs `odom` or `velocity` for anything but Operator stop, then `cmd_vel` for the
+  joystick, `nav2_action` for waypoints and Cancel, and `pause_topic` for Pause. A VDA 5050 factsheet can rule actions out.
 - **Joystick or waypoints off.** The robot's data is STALE. Operator stop stays.
 - **Nav2 isn't answering.** `styri check` shows whether the action server is up.
 

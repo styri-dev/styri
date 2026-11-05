@@ -80,14 +80,14 @@ def unknown_types(monitors: list[Monitor]) -> dict[str, int]:
     return counts
 
 
-Line = tuple[bool, str, str]  # passed, what, detail
+Line = tuple[bool | None, str, str]  # passed (None: a warning, not a failure), what, detail
 
 
 def show(lines: list[Line], out: Out) -> int:
     """Print PASS/FAIL lines. Returns how many failed."""
     for ok, what, detail in lines:
-        out(f"  {'PASS' if ok else 'FAIL'}  {what:<20} {detail}".rstrip())
-    return sum(not ok for ok, _, _ in lines)
+        out(f"  {'WARN' if ok is None else 'PASS' if ok else 'FAIL'}  {what:<20} {detail}".rstrip())
+    return sum(ok is False for ok, _, _ in lines)
 
 
 class Quiet:
@@ -187,6 +187,9 @@ def control_lines(settings: mapping.Settings, robots: list[mapping.RobotMap], mo
             lines.append(found(link.nav2_action, "Nav2 action", link.nav2_status()))
         if not (link.cmd_vel or link.nav2_action):
             lines.append((True, r.name, "view only: nothing whitelisted"))
+        elif not (link.odom or link.velocity):
+            lines.append((None, f"{r.name} speed", "no odom or velocity topic: Operator stop only, and it can't "
+                                                   "be confirmed. Add one to drive or send this robot."))
     return lines
 
 

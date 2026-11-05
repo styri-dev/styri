@@ -306,7 +306,7 @@ class Monitor:
                     else f"Robot healthy. {len(stale_names)} values are stale." if stale_names
                     else "All systems normal.")
 
-        names = {"ok": "OK", "warn": "WARNING", "fault": "FAULT", "unknown": "NO DATA"}
+        names = {"ok": "OK", "warn": "WARNING", "fault": "FAULT", "unknown": "OFFLINE"}
         if self._overall is not None and overall != self._overall and self.robot_found():
             self.activity.add("state", f"Robot status changed {names[self._overall]} → {names[overall]}", "overview")
         self._overall = overall

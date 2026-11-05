@@ -60,7 +60,7 @@ export interface RobotModel {
   protocol: Protocol;
   vendor: string | null;
   model: string | null;
-  verdict: "OK" | "WARNING" | "FAULT" | "NO DATA";
+  verdict: "OK" | "WARNING" | "FAULT" | "OFFLINE";
   reason: string;
   battery: number | null;
   voltage: number | null;
@@ -77,7 +77,7 @@ export interface RobotModel {
   limits: { max_linear: number; max_angular: number };
   points: string[];
   vehicle_stop: boolean;
-  stop: "stopping" | "unconfirmed" | null; // Operator stop, until the robot stands still
+  stop: "sent" | "stopped" | "no_reply" | "not_confirmed" | "cant_confirm" | null; // the last Operator stop
   factsheet: Record<string, any> | null;
 }
 
