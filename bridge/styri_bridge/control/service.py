@@ -25,7 +25,7 @@ from ..model import RobotView, capabilities, is_stale, stop_over, stop_sent
 from ..server import MAX_MESSAGE, MAX_MESSAGE_LOGGED_IN, BridgeServer, Session, peer_ip
 from ..sitemap import Graph, GraphError
 from . import commands
-from .auth import ADMIN, ANONYMOUS, Admin, token_from
+from .auth import ADMIN, ANONYMOUS, OPERATOR, AccountError, Accounts, Switches, User, token_from
 from .commands import CommandError
 from .sinks import LogSink, RosSink
 from .teleop import Teleop
@@ -45,12 +45,14 @@ class Refused(Exception):
 
 
 class Control:
-    def __init__(self, bridge: BridgeServer, admin: Admin | None = None, sinks: dict | None = None, vda=None):
+    def __init__(self, bridge: BridgeServer, accounts: Accounts | None = None, sinks: dict | None = None, vda=None,
+                 switches: Switches | None = None):
         self.bridge = bridge
         self.audit = bridge.audit
         settings = bridge.cfg.mapping.settings
-        self.admin = admin or Admin(str(Path(bridge.cfg.audit_db).parent / "admin.hash")
-                                    if bridge.cfg.audit_db != ":memory:" else None, settings.session_hours)
+        folder = None if bridge.cfg.audit_db == ":memory:" else Path(bridge.cfg.audit_db).parent
+        self.accounts = accounts or Accounts(str(folder / "users.json") if folder else None, settings.session_hours)
+        self.switches = switches or Switches(str(folder / "switches.json") if folder else None)
         self.teleop = Teleop()
         self.sinks: dict[int, object] = dict(sinks or {})
         self.vda = vda
@@ -70,6 +72,15 @@ class Control:
         b.actions["LOGOUT"] = self._logout
         b.actions["AUDIT"] = self._audit_rows
         b.actions["GRAPH_SAVE"] = self._graph_save
+        for action, handler in (("USERS", self._users), ("USER_ADD", self._user_add), ("USER_REMOVE", self._user_remove),
+                                ("USER_ROLE", self._user_role), ("USER_PASSWORD", self._user_password),
+                                ("SWITCHES", self._set_switches)):
+            b.actions[action] = lambda s, d, h=handler, a=action: self._admin_only(s, a, d, h)
+        b.view_gate = lambda session: self.switches.anonymous_view or self._account(session) is not None
+        b.http_gate = lambda request: self.switches.anonymous_view or \
+            self.accounts.valid(token_from(request.headers.get("Cookie")))
+        if self.vda is not None:
+            self.vda.control = self.switches.control
         b.routes["/api/session"] = self._set_cookie
         b.routes["/api/logout"] = self._clear_cookie
         b.routes["/audit.jsonl"] = self._export
@@ -98,7 +109,7 @@ class Control:
     def _hello(self, session: Session) -> dict:
         request = session.ws.request
         token = token_from(request.headers.get("Cookie")) if request else None
-        if self.admin.valid(token):
+        if "token" not in session.data and self.accounts.valid(token):
             self._logged_in_now(session, token)
         return {"control": self._status(session)}
 
@@ -109,14 +120,18 @@ class Control:
         session.ws.protocol.max_message_size = MAX_MESSAGE_LOGGED_IN
 
     def _status(self, session: Session) -> dict:
-        return {"enabled": True, "logged_in": self._logged_in(session), "needs_setup": self.admin.needs_setup,
-                "session_hours": self.admin.lifetime / 3600, "stop_requires_login": self.stop_requires_login}
+        user = self._account(session)
+        return {"enabled": self.switches.control, "available": True, "logged_in": user is not None,
+                "user": {"name": user.name, "role": user.role} if user else None,
+                "needs_setup": self.accounts.needs_setup, "session_hours": self.accounts.lifetime / 3600,
+                "stop_requires_login": self.stop_requires_login, "anonymous_view": self.switches.anonymous_view}
 
-    def _logged_in(self, session: Session) -> bool:
-        return self.admin.valid(session.data.get("token"), touch=False)
+    def _account(self, session: Session, touch: bool = False) -> User | None:
+        return self.accounts.user(session.data.get("token"), touch=touch)
 
     def _user(self, session: Session) -> str:
-        return ADMIN if self._logged_in(session) else ANONYMOUS
+        user = self._account(session)
+        return user.name if user else ANONYMOUS
 
     @staticmethod
     def _agent(session: Session) -> str | None:
@@ -133,72 +148,75 @@ class Control:
 
     async def _login(self, session: Session, data: dict) -> dict:
         client = session.client
-        wait = self.admin.locked(client)
+        name = data.get("username") or ADMIN
+        wait = self.accounts.locked(client)
         if wait > 0:
-            self.audit.record("login_throttled", client=client, user=ADMIN)
+            self.audit.record("login_throttled", client=client, user=str(name)[:32])
             return {"type": "auth", "error": f"Too many attempts. Try again in {int(wait) + 1} s.", "control": self._status(session)}
         password = data.get("password")
         # scrypt is slow on purpose: off the event loop.
-        ok = isinstance(password, str) and await asyncio.to_thread(self.admin.check, client, password)
-        if not ok:
-            self.audit.record("login_failed", client=client, user=ADMIN)
-            return {"type": "auth", "error": "Wrong password.", "control": self._status(session)}
-        return self._open(session)
+        user = await asyncio.to_thread(self.accounts.check, client, name, password) \
+            if isinstance(password, str) and isinstance(name, str) else None
+        if user is None:
+            self.audit.record("login_failed", client=client, user=str(name)[:32])
+            return {"type": "auth", "error": "Wrong username or password.", "control": self._status(session)}
+        return await self._open(session, user.name)
 
-    def _open(self, session: Session) -> dict:
-        token, ticket = self.admin.open_session()
+    async def _open(self, session: Session, name: str) -> dict:
+        token, ticket = self.accounts.open_session(name)
         self._logged_in_now(session, token)
-        self.audit.record("login", client=session.client, user=ADMIN)
+        self.audit.record("login", client=session.client, user=name)
+        await self.bridge.open_view(session)
         return {"type": "auth", "ticket": ticket, "control": self._status(session)}
 
     async def _setup(self, session: Session, data: dict) -> dict:
-        password = data.get("password")
         try:
-            if not isinstance(password, str):
-                raise ValueError("enter a password")
-            await asyncio.to_thread(self.admin.setup, password)
-        except ValueError as exc:
+            await asyncio.to_thread(self.accounts.setup, data.get("password"))
+        except AccountError as exc:
             return {"type": "auth", "error": str(exc).capitalize() + ".", "control": self._status(session)}
         self.audit.record("admin_password_set", client=session.client, user=ADMIN)
-        return self._open(session)
+        return await self._open(session, ADMIN)
 
     async def _logout(self, session: Session, data: dict) -> dict:
+        who = self._user(session)
         self.teleop.disconnected(session)
-        self.admin.close_session(session.data.pop("token", None))
+        self.accounts.close_session(session.data.pop("token", None))
         session.ws.protocol.max_message_size = MAX_MESSAGE
-        self.audit.record("logout", client=session.client, user=ADMIN)
+        self.audit.record("logout", client=session.client, user=who)
+        if not self.switches.anonymous_view:
+            await self.bridge.close_view(session)
         return {"type": "auth", "control": self._status(session)}
 
     def _set_cookie(self, connection, request):
         query = parse_qs(urlsplit(request.path).query)
-        token = self.admin.redeem(query.get("ticket", [""])[0])
+        token = self.accounts.redeem(query.get("ticket", [""])[0])
         if token is None:
             return connection.respond(HTTPStatus.UNAUTHORIZED, "ticket not valid\n")
         response = connection.respond(HTTPStatus.OK, "ok\n")
-        response.headers["Set-Cookie"] = self.admin.cookie(token)
+        response.headers["Set-Cookie"] = self.accounts.cookie(token)
         response.headers["Cache-Control"] = "no-store"
         return response
 
     def _clear_cookie(self, connection, request):
-        self.admin.close_session(token_from(request.headers.get("Cookie")))
+        self.accounts.close_session(token_from(request.headers.get("Cookie")))
         response = connection.respond(HTTPStatus.OK, "ok\n")
-        response.headers["Set-Cookie"] = self.admin.clear_cookie()
+        response.headers["Set-Cookie"] = self.accounts.clear_cookie()
         return response
 
     # ---- the audit log ------------------------------------------------------
 
     async def _audit_rows(self, session: Session, data: dict) -> dict:
-        if not self._logged_in(session):
+        if self._account(session) is None:
             return {"type": "error", "action": "AUDIT", "error": "Log in to see the audit log."}
         robot = data.get("robot") if isinstance(data.get("robot"), str) else None
         return {"type": "audit", "robot": robot, "rows": self.audit.commands(robot, AUDIT_ROWS)}
 
     def _export(self, connection, request):
         client = peer_ip(connection, request)
-        if not self.admin.valid(token_from(request.headers.get("Cookie"))):
+        if not self.accounts.valid(token_from(request.headers.get("Cookie"))):
             self.audit.record("auth_rejected", client=client, path="/audit.jsonl")
             return connection.respond(HTTPStatus.UNAUTHORIZED, "log in first\n")
-        self.audit.record("audit_export", client=client, user=ADMIN)
+        self.audit.record("audit_export", client=client, user=self.accounts.user(token_from(request.headers.get("Cookie"))).name)
         body = "".join(json.dumps(row) + "\n" for row in self.audit.commands())
         response = connection.respond(HTTPStatus.OK, body)
         del response.headers["Content-Type"]
@@ -207,12 +225,69 @@ class Control:
         response.headers["Cache-Control"] = "no-store"
         return response
 
+    # ---- users and switches: admins only ---------------------------------------
+
+    async def _admin_only(self, session: Session, action: str, data: dict, handler) -> dict:
+        user = self._account(session, touch=True)
+        if user is None or not user.can(ADMIN):
+            return self._reject(session, action, "Log in as an admin to manage users.")
+        try:
+            detail = await handler(session, data)
+        except AccountError as exc:
+            return self._reject(session, action, str(exc).capitalize() + ".")
+        if detail is not None:  # passwords never reach the log
+            self.audit.record("command", client=session.client, user=user.name, action=action, payload=detail)
+        return {"type": "users", "users": self.accounts.list(), "control": self._status(session)}
+
+    async def _users(self, session: Session, data: dict) -> None:
+        return None
+
+    async def _user_add(self, session: Session, data: dict) -> dict:
+        await asyncio.to_thread(self.accounts.add, data.get("name"), data.get("password"), data.get("role"))
+        return {"name": data["name"], "role": data["role"]}
+
+    async def _user_remove(self, session: Session, data: dict) -> dict:
+        self.accounts.remove(data.get("name"))
+        return {"name": data["name"]}
+
+    async def _user_role(self, session: Session, data: dict) -> dict:
+        self.accounts.set_role(data.get("name"), data.get("role"))
+        return {"name": data["name"], "role": data["role"]}
+
+    async def _user_password(self, session: Session, data: dict) -> dict:
+        await asyncio.to_thread(self.accounts.set_password, data.get("name"), data.get("password"))
+        return {"name": data["name"]}
+
+    async def _set_switches(self, session: Session, data: dict) -> dict:
+        changed = {}
+        for key in ("control", "anonymous_view"):
+            if isinstance(data.get(key), bool) and data[key] != getattr(self.switches, key):
+                setattr(self.switches, key, data[key])
+                changed[key] = data[key]
+        self.switches.save()
+        if "control" in changed:
+            if self.vda is not None:
+                self.vda.control = self.switches.control
+            if not self.switches.control:
+                self.teleop.stop_all("control_off")
+            self.bridge.activity.add("warning", f"Robot control turned {'on' if self.switches.control else 'off'}", "control")
+        for other in list(self.bridge.sessions):
+            if self.bridge.view_gate(other):
+                await self.bridge.open_view(other)
+            elif other.viewing:
+                await self.bridge.close_view(other)
+        if changed:
+            self.bridge.publish_threadsafe({"type": "switches", "enabled": self.switches.control,
+                                            "anonymous_view": self.switches.anonymous_view})
+        return changed
+
     # ---- the node graph ---------------------------------------------------------
 
     async def _graph_save(self, session: Session, data: dict) -> dict:
         """The map editor's save. An order already running keeps its route."""
-        if not self.admin.valid(session.data.get("token")):
-            return self._reject(session, "GRAPH_SAVE", "Log in to edit the map.")
+        user = self._account(session, touch=True)
+        if user is None or not user.can(ADMIN):
+            return self._reject(session, "GRAPH_SAVE", "Log in as an admin to edit the map.")
         site = self.bridge.site
         try:
             graph = Graph.from_dict(data.get("graph"))
@@ -230,7 +305,7 @@ class Control:
                                                            "Its folder must be writable by Styri (uid 10001), not mounted :ro.")
         if self.vda is not None:
             self.vda.graph = graph
-        self.audit.record("command", client=session.client, user=ADMIN, action="GRAPH_SAVE",
+        self.audit.record("command", client=session.client, user=user.name, action="GRAPH_SAVE",
                           payload={"nodes": len(graph.nodes), "edges": len(graph.edges)},
                           user_agent=self._agent(session))
         self.bridge.activity.add("state", f"Node graph saved: {len(graph.nodes)} nodes, {len(graph.edges)} edges", "control")
@@ -265,14 +340,15 @@ class Control:
     async def _robot_command(self, session: Session, action: str, data: dict) -> dict | None:
         payload = {k: v for k, v in data.items() if k not in ("action", "robot", "id")}
         robot = data.get("robot") if isinstance(data.get("robot"), str) else None
-        logged_in = self.admin.valid(session.data.get("token"))
-        if not logged_in and not (action == "OPERATOR_STOP" and not self.stop_requires_login):
-            return self._reject(session, action, "Log in to control robots.", robot, payload)
+        user = self._account(session, touch=True)
+        refused = self._refusal(user, action)
+        if refused:
+            return self._reject(session, action, refused, robot, payload)
         try:
             view = self._view(data)
             robot = view.id
             self._allow(view, action)
-            if action == "OPERATOR_STOP" and not logged_in and self._too_soon(view):
+            if action == "OPERATOR_STOP" and user is None and self._too_soon(view):
                 return self._reject(session, action, "Stop already sent.", robot, payload, limited=True)
             if action == "TELEOP":
                 return self._drive(session, view, data, payload)
@@ -291,6 +367,18 @@ class Control:
         if action == "OPERATOR_STOP":
             view.monitor.activity.add("warning", f"Operator stop from {session.client} ({self._user(session)})", "control")
         return {"type": "ack", "action": action, "robot": robot, "id": data.get("id")}
+
+    def _refusal(self, user: User | None, action: str) -> str | None:
+        """Who may do what. Anyone may stop: it's the safe direction, and undoing one needs an operator."""
+        if not self.switches.control:
+            return "Robot control is off."
+        if action in ("OPERATOR_STOP", "OPERATOR_STOP_ALL"):
+            if user is None and (self.stop_requires_login or not self.switches.anonymous_view):
+                return "Log in to control robots."
+            return None
+        if user is None:
+            return "Log in to control robots."
+        return None if user.can(OPERATOR) else "Log in as an operator to send commands."
 
     def _too_soon(self, view: RobotView) -> bool:
         """A stop without a login goes through once per robot per ANONYMOUS_STOP_EVERY."""
@@ -352,17 +440,18 @@ class Control:
             raise Refused(OTHER_DRIVER)
         if started:
             stop_over(view.live)
-            self.audit.record("command", client=session.client, user=ADMIN, action="TELEOP", robot=view.id,
+            self.audit.record("command", client=session.client, user=self._user(session), action="TELEOP", robot=view.id,
                               payload={"event": "start", "limits": [link.max_linear, link.max_angular]})
         return None  # streams at 10-20 Hz: no reply per message
 
     def _drive_ended(self, session: Session, view: RobotView, reason: str) -> None:
-        self.audit.record("command", client=session.client, user=ADMIN, action="TELEOP", robot=view.id,
+        self.audit.record("command", client=session.client, user=self._user(session), action="TELEOP", robot=view.id,
                           payload={"event": "stop", "reason": reason})
 
     async def _stop_all(self, session: Session, data: dict) -> dict:
-        if self.stop_requires_login and not self.admin.valid(session.data.get("token")):
-            return self._reject(session, "OPERATOR_STOP_ALL", "Log in to control robots.")
+        refused = self._refusal(self._account(session, touch=True), "OPERATOR_STOP_ALL")
+        if refused:
+            return self._reject(session, "OPERATOR_STOP_ALL", refused)
         results = await asyncio.gather(*(self._robot_command(session, "OPERATOR_STOP", {"robot": v.id})
                                          for v in self.bridge.robots if capabilities(v.map, v.live)["can_stop"]))
         # A robot whose stop went out moments ago is stopping: that's not a failure.

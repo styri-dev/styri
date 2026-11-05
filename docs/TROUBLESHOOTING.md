@@ -117,13 +117,16 @@ that isn't in `styri.yaml`.
 ## Control
 
 - **No drawer.** Control is off. Set `control.enabled: true` or `STYRI_CONTROL=1`.
-- **Forgot the admin password.** Delete `admin.hash` next to the audit database
-  and set a new one, or set `STYRI_ADMIN_PASSWORD`, which takes priority.
+- **Forgot a password.** An admin can reset it on the Users screen. In the terminal:
+  `styri users password <name>`, run inside the Styri container.
 - **"Log in to control robots" after a restart.** Sessions don't survive a
   restart, on purpose.
 - **"Stop already sent."** Without a login, a robot takes one stop every 2 seconds.
   The first one went through.
 - **Too many attempts.** Five wrong passwords lock that address out for a minute.
+- **"Log in as an operator to send commands".** Viewers can watch and stop. Sending,
+  pausing and driving need an operator or admin.
+- **Everything asks for a login.** An admin turned anonymous viewing off.
 - **Buttons missing.** The panel shows only what a robot supports: a ROS 2 robot
   needs `odom` or `velocity` for anything but Operator stop, then `cmd_vel` for the
   joystick, `nav2_action` for waypoints and Cancel, and `pause_topic` for Pause. A VDA 5050 factsheet can rule actions out.

@@ -89,6 +89,10 @@ class Session:
     ws: ServerConnection
     client: str
     data: dict = field(default_factory=dict)  # per-connection state for extensions
+    viewing: bool = False  # gets robot data; False while a login is required first
+
+    def __hash__(self) -> int:
+        return id(self)
 
 
 Action = Callable[[Session, dict], Awaitable[dict | None]]
@@ -126,6 +130,9 @@ class BridgeServer:
         self.site = Site(settings.map, settings.graph)
         self.vda = None  # the VDA 5050 client, when there are such robots
         self.clients: set[ServerConnection] = set()
+        self.sessions: set[Session] = set()
+        self.view_gate: Callable[[Session], bool] | None = None  # None: anyone on the LAN may view
+        self.http_gate: Callable[[Request], bool] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._snapshots: dict[int, dict] = {}
         # Extension points (see extensions.py). Empty in Styri Core.
@@ -286,6 +293,8 @@ class BridgeServer:
     # ---- HTTP -----------------------------------------------------------
 
     def _site_image(self, connection: ServerConnection, request: Request) -> Response:
+        if self.http_gate is not None and not self.http_gate(request):
+            return connection.respond(HTTPStatus.UNAUTHORIZED, "log in first\n")
         try:
             image = self.site.image()
         except (OSError, GraphError) as exc:
@@ -313,8 +322,7 @@ class BridgeServer:
 
     # ---- WebSocket --------------------------------------------------------
 
-    async def _handler(self, ws: ServerConnection) -> None:
-        session = Session(ws, client=peer_ip(ws))
+    def _hello(self, session: Session) -> dict:
         hello = {"type": "hello", "api": 2, "version": __version__, "robot": self.cfg.robot_name,
                  "domain": self.domain, "stale_after": self.cfg.stale_after, "controls": False,
                  "not_shown": self.not_shown, "site": self.site.describe(),
@@ -324,12 +332,39 @@ class BridgeServer:
                  **self.hello_extra}
         for hook in self.hello_session:
             hello.update(hook(session))
-        await ws.send(json.dumps(hello))
-        await ws.send(json.dumps({"type": "activity", "events": self.activity.recent()}))
+        return hello
+
+    async def open_view(self, session: Session) -> None:
+        """Start sending this connection robot data."""
+        if session.viewing:
+            return
+        session.viewing = True
+        await session.ws.send(json.dumps(self._hello(session)))
+        await session.ws.send(json.dumps({"type": "activity", "events": self.activity.recent()}))
         for snap in list(self._snapshots.values()):
-            await ws.send(json.dumps(snap, allow_nan=False))
+            await session.ws.send(json.dumps(snap, allow_nan=False))
         # Join the broadcast only after the history, so no event is sent twice.
-        self.clients.add(ws)
+        self.clients.add(session.ws)
+
+    async def close_view(self, session: Session) -> None:
+        """Nothing about the robots from here on, until a login."""
+        session.viewing = False
+        self.clients.discard(session.ws)
+        hello = {"type": "hello", "api": 2, "version": __version__, "locked": True, "robots": []}
+        for hook in self.hello_session:
+            hello.update(hook(session))
+        await session.ws.send(json.dumps(hello))
+
+    async def _handler(self, ws: ServerConnection) -> None:
+        session = Session(ws, client=peer_ip(ws))
+        self.sessions.add(session)
+        # The hooks read the session's cookie, so they run before the gate does.
+        for hook in self.hello_session:
+            hook(session)
+        if self.view_gate is None or self.view_gate(session):
+            await self.open_view(session)
+        else:
+            await self.close_view(session)
         for hook in self.on_connect:
             hook(session)
         self.activity.add("connection", f"Browser connected from {session.client}", "browser")
@@ -341,6 +376,7 @@ class BridgeServer:
         except ConnectionClosed:
             pass
         finally:
+            self.sessions.discard(session)
             self.clients.discard(ws)
             for hook in self.on_disconnect:
                 hook(session)
@@ -352,6 +388,8 @@ class BridgeServer:
             if action == "PING":
                 return {"type": "pong", "t": protocol.ping(data).t}
             if action == "SELECT":
+                if not session.viewing:
+                    return {"type": "error", "action": "SELECT", "error": "Log in to view."}
                 sel = protocol.select(data)
                 return await self._select(sel.topic, sel.robot)
         except protocol.ProtocolError as exc:

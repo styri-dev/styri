@@ -267,6 +267,13 @@ An entry also takes everything a single robot does (`battery:`, `status:`,
 `fields:` and so on), and top-level sections are shared defaults. The older
 `robots: [{robot: {name: ...}}]` form keeps working.
 
+**Users.** Accounts are viewer, operator or admin. Anyone can view and stop; operators
+and admins can send, pause and drive; admins manage users, the map and two live
+switches: robot control, and anonymous viewing, which when off means nothing is sent
+to a browser until it logs in. Admins do this on the Users screen, or in the terminal
+with `styri users`, inside the Styri container. All of it needs `control.enabled: true`.
+`STYRI_ADMIN_PASSWORD` sets the `admin` account's password at each start.
+
 **Whitelist.** Control sends only to what the file names: each ROS robot's
 `cmd_vel`, `nav2_action` and `pause_topic`, and each VDA robot's
 `instant_actions` (default `startPause`, `stopPause`, `cancelOrder`,

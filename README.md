@@ -46,7 +46,7 @@ Open **http://localhost:8080** and log in with `styri-demo`. `docker compose dow
 
 ## Control and safety
 
-Styri can command ROS 2 and VDA 5050 robots from one panel: hold-to-drive teleop, waypoints, pause, resume, cancel and Operator stop, per robot and for the whole fleet. It's off by default. Turning it on takes `control.enabled: true` (or `STYRI_CONTROL=1`) and a local admin password. Viewing stays open on the LAN, and so does stopping: anyone at the panel can press Operator stop, unless you set `control.stop_requires_login: true`. Every other command needs the login. All of them must be on the whitelist in your `styri.yaml`, and go in a local append-only audit log.
+Styri can command ROS 2 and VDA 5050 robots from one panel: hold-to-drive teleop, waypoints, pause, resume, cancel and Operator stop, per robot and for the whole fleet. It's off by default. Turning it on takes `control.enabled: true` (or `STYRI_CONTROL=1`) and a local admin password. Accounts are viewer, operator or admin, managed on the Users screen or with `styri users`. Viewing stays open on the LAN, and so does stopping: anyone at the panel can press Operator stop, unless you set `control.stop_requires_login: true`. Every other command needs an operator login. All of them must be on the whitelist in your `styri.yaml`, and go in a local append-only audit log.
 
 Operator stop is a software stop. It is not an emergency stop or a safety function. Styri has no safety certification, and safety-rated stops must be hardware on the robot or the site safety system. Read [SAFETY.md](SAFETY.md) before you turn control on.
 

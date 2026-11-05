@@ -31,13 +31,13 @@ functions in place.
 ## What Styri does to limit risk
 
 - Control is off by default. Off, Styri sends nothing at all.
-- Commands need the admin login and must be on the whitelist in `styri.yaml`.
+- Commands need an operator or admin login and must be on the whitelist in `styri.yaml`.
 - The one exception is stopping, the safe direction. With control on, anyone who
   can open the panel can press Operator stop or Stop all, so whoever sees a problem
   can act. Those stops are logged as "anonymous", with the browser's address and
   user agent, and limited to one per robot every 2 seconds. Stop all takes a
   one-second press and hold, so a stray tap can't halt the fleet. Undoing a stop
-  (resume, a new goal, teleop) always needs the login.
+  (resume, a new goal, teleop) always needs an operator login.
 - `control.stop_requires_login: true` makes stopping need the login too.
 - Teleop goes out only while the control is held. The bridge caps the speed.
 - If the browser or connection drops during teleop, the bridge sends zero velocity
@@ -58,6 +58,6 @@ Because stopping needs no login, anyone on the network can keep robots stopped. 
 that's a concern, set `control.stop_requires_login: true`.
 
 The panel uses plain HTTP, so the admin password crosses the network unencrypted.
-Keep it on a network you trust, or put a TLS proxy in front. Until the password
+Keep it on a network you trust, or put a TLS proxy in front. Until the first password
 is set, the first person to open the panel can set it: set `STYRI_ADMIN_PASSWORD`
 on any shared network.

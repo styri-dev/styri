@@ -89,8 +89,11 @@ def main(argv: list[str] | None = None) -> None:
     if argv[:1] == ["check"]:
         from . import check
         sys.exit(check.main(argv[1:]))
+    if argv[:1] == ["users"]:
+        from .control import users_cli
+        sys.exit(users_cli.main(argv[1:]))
     parser = argparse.ArgumentParser(prog="styri", epilog="styri check [styri.yaml]: test a mapping file "
-                                     "against the live robot")
+                                     "against the live robot. styri users: manage accounts")
     parser.add_argument("--fake", action="store_true", help="simulate a robot instead of using ROS 2")
     parser.add_argument("--config", help="mapping file (default: STYRI_CONFIG or /etc/styri/styri.yaml)")
     args = parser.parse_args(argv)

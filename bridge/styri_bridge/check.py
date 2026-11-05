@@ -166,7 +166,7 @@ def control_lines(settings: mapping.Settings, robots: list[mapping.RobotMap], mo
                   env: dict | None = None) -> list[Line]:
     """Is the control config complete, and does what it allows exist on the network?"""
     env = os.environ if env is None else env
-    has_password = bool(env.get("STYRI_ADMIN_PASSWORD")) or (Path(audit_db).parent / "admin.hash").is_file()
+    has_password = bool(env.get("STYRI_ADMIN_PASSWORD")) or (Path(audit_db).parent / "users.json").is_file()
     lines: list[Line] = [(True, "Control", "enabled"),
                          (has_password, "Admin password", "set" if has_password else
                           "not set. Set STYRI_ADMIN_PASSWORD, or use the first-run screen.")]

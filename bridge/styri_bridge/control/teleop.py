@@ -82,12 +82,15 @@ class Teleop:
         self._running = True
         threading.Thread(target=self._watch, name="teleop-watchdog", daemon=True).start()
 
-    def stop(self) -> None:
-        self._running = False
+    def stop_all(self, reason: str) -> None:
         with self._lock:
             robots = list(self._drives)
         for robot in robots:
-            self.release(robot, "shutdown")
+            self.release(robot, reason)
+
+    def stop(self) -> None:
+        self._running = False
+        self.stop_all("shutdown")
 
     def _watch(self) -> None:
         while self._running:

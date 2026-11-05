@@ -12,7 +12,7 @@ from websockets.asyncio.client import connect
 from helpers import run_bridge
 from styri_bridge import mapping
 from styri_bridge.config import Config
-from styri_bridge.control.auth import Admin
+from styri_bridge.control.auth import Accounts, Switches
 from styri_bridge.control.service import Control
 from styri_bridge.control.teleop import GAP, Teleop
 
@@ -61,8 +61,8 @@ def bridge(test):
     sink, holder = Sink(), {}
 
     def setup(server):
-        admin = Admin(None, env={"STYRI_ADMIN_PASSWORD": PASSWORD})
-        holder["control"] = Control(server, admin=admin, sinks={0: sink, 1: Sink()}).attach()
+        accounts = Accounts(None, env={"STYRI_ADMIN_PASSWORD": PASSWORD})
+        holder["control"] = Control(server, accounts=accounts, sinks={0: sink, 1: Sink()}).attach()
 
     async def wrapped(url, server, audit):
         for view in server.robots:  # fresh data, so the robots aren't stale
@@ -80,7 +80,7 @@ async def ask(ws, **msg):
     await ws.send(json.dumps(msg))
     while True:
         reply = json.loads(await asyncio.wait_for(ws.recv(), 3))
-        if reply["type"] not in ("event", "snapshot", "fleet", "hello", "activity", "site"):
+        if reply["type"] not in ("event", "snapshot", "fleet", "hello", "activity", "site", "switches"):
             return reply
 
 
@@ -98,8 +98,9 @@ def test_commands_need_a_login_and_viewing_does_not():
     async def go(url, server, audit, sink, control):
         async with connect(url) as ws:
             hello = json.loads(await ws.recv())
-            assert hello["control"] == {"enabled": True, "logged_in": False, "needs_setup": False, "session_hours": 8.0,
-                                        "stop_requires_login": False}
+            assert hello["control"] == {"enabled": True, "available": True, "logged_in": False, "user": None,
+                                        "needs_setup": False, "session_hours": 8.0, "stop_requires_login": False,
+                                        "anonymous_view": True}
             for msg in ({"action": "TELEOP", "robot": "a", "linear": 0.1, "angular": 0},
                         {"action": "GOAL", "robot": "a", "x": 1, "y": 1}, {"action": "PAUSE", "robot": "a"},
                         {"action": "RESUME", "robot": "a"}, {"action": "CANCEL", "robot": "a"}):
@@ -197,14 +198,14 @@ def test_a_wrong_password_is_refused_and_locks_out():
     async def go(url, server, audit, sink, control):
         async with connect(url) as ws:
             for _ in range(5):
-                assert "Wrong" in (await ask(ws, action="LOGIN", password="nope"))["error"]
+                assert "Wrong" in (await ask(ws, action="LOGIN", password="nopeeeee"))["error"]
             assert "Too many" in (await ask(ws, action="LOGIN", password=PASSWORD))["error"]
     bridge(go)
 
 
 def test_first_run_setup_works_once():
     async def go(url, server, audit, sink, control):
-        control.admin = Admin(None, env={})
+        control.accounts = Accounts(None, env={})
         async with connect(url) as ws:
             assert "at least" in (await ask(ws, action="SETUP", password="short"))["error"]
             reply = await ask(ws, action="SETUP", password=PASSWORD)
@@ -241,14 +242,14 @@ def test_the_ticket_sets_an_http_only_cookie_once():
 
 def test_sessions_end_after_inactivity():
     now = [0.0]
-    admin = Admin(None, session_hours=1, env={"STYRI_ADMIN_PASSWORD": PASSWORD}, clock=lambda: now[0])
-    token, _ = admin.open_session()
+    accounts = Accounts(None, session_hours=1, env={"STYRI_ADMIN_PASSWORD": PASSWORD}, clock=lambda: now[0])
+    token, _ = accounts.open_session()
     now[0] = 3000
-    assert admin.valid(token)
+    assert accounts.valid(token)
     now[0] = 6000  # used at 3000, so still inside the hour
-    assert admin.valid(token)
+    assert accounts.valid(token)
     now[0] = 9601
-    assert not admin.valid(token)
+    assert not accounts.valid(token)
 
 
 def test_speed_caps_are_enforced_in_the_bridge():
@@ -401,7 +402,7 @@ def editing(tmp_path, test):
     holder = {}
 
     def setup(server):
-        holder["c"] = Control(server, admin=Admin(None, env={"STYRI_ADMIN_PASSWORD": PASSWORD}), sinks={0: Sink()}).attach()
+        holder["c"] = Control(server, accounts=Accounts(None, env={"STYRI_ADMIN_PASSWORD": PASSWORD}), sinks={0: Sink()}).attach()
 
     async def wrapped(url, server, audit):
         await test(url, server, audit, holder["c"], path)
@@ -560,3 +561,222 @@ def test_teleop_guard_on_a_fake_clock():
     now[0] = GAP + 0.01
     t.check()
     assert sent == [(0.3, 0.0), (0.0, 0.0), "watchdog"]
+
+
+# ---- roles: who may do what, in the bridge -----------------------------------
+
+def team(test, stop_requires_login=False):
+    sink, holder = Sink(), {}
+
+    def setup(server):
+        accounts = Accounts(None, env={"STYRI_ADMIN_PASSWORD": PASSWORD})
+        accounts.add("olive", PASSWORD, "operator")
+        accounts.add("vic", PASSWORD, "viewer")
+        holder["c"] = Control(server, accounts=accounts, sinks={0: sink, 1: Sink()}).attach()
+        holder["c"].stop_requires_login = stop_requires_login
+
+    async def wrapped(url, server, audit):
+        for view in server.robots:
+            topic = view.map.value("battery").topic
+            view.monitor.discovered([(topic, "sensor_msgs/msg/BatteryState")], lambda _t: True)
+            view.monitor.message(topic, {"percentage": 0.8, "voltage": 24.0})
+            view.monitor.mapped(topic, {"percentage": 0.8, "voltage": 24.0})
+            server.snapshot(view.index)
+        await test(url, server, audit, sink, holder["c"])
+    return run_bridge(wrapped, setup=setup, cfg=config())
+
+
+async def as_user(ws, name):
+    reply = await ask(ws, action="LOGIN", username=name, password=PASSWORD)
+    assert reply["control"]["user"]["name"] == name, reply
+    return reply
+
+
+COMMANDS = [{"action": "GOAL", "robot": "a", "x": 1, "y": 1}, {"action": "PAUSE", "robot": "a"},
+            {"action": "RESUME", "robot": "a"}, {"action": "CANCEL", "robot": "a"}]
+ADMIN_ONLY = [{"action": "USERS"}, {"action": "USER_ADD", "name": "x", "password": PASSWORD, "role": "viewer"},
+              {"action": "USER_REMOVE", "name": "vic"}, {"action": "USER_ROLE", "name": "vic", "role": "admin"},
+              {"action": "USER_PASSWORD", "name": "vic", "password": PASSWORD}, {"action": "SWITCHES", "control": False},
+              {"action": "GRAPH_SAVE", "graph": GRAPH, "version": None}]
+
+
+@pytest.mark.parametrize("who, commands_work, admin_works", [(None, False, False), ("vic", False, False),
+                                                             ("olive", True, False), ("admin", True, True)])
+def test_permission_matrix(who, commands_work, admin_works):
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            if who:
+                await as_user(ws, who)
+            for msg in COMMANDS:
+                reply = await ask(ws, **msg)
+                assert (reply["type"] == "ack") == commands_work, (who, msg, reply)
+            if not admin_works:
+                for msg in ADMIN_ONLY:
+                    assert (await ask(ws, **msg))["type"] == "error", (who, msg)
+                assert len(control.accounts.list()) == 3 and control.switches.control
+            await asyncio.sleep(2.1)
+            assert (await ask(ws, action="OPERATOR_STOP", robot="a"))["type"] == "ack", who  # everyone can stop
+            if who:
+                assert (await ask(ws, action="AUDIT"))["type"] == "audit"
+    team(go)
+
+
+def test_a_viewer_is_told_to_log_in_as_an_operator_and_the_log_has_their_name():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await as_user(ws, "vic")
+            reply = await ask(ws, action="PAUSE", robot="a")
+            assert reply["error"] == "Log in as an operator to send commands."
+            await ask(ws, action="OPERATOR_STOP", robot="a")
+        assert [r["user"] for r in audit.commands()] == ["vic", "vic"]
+    team(go)
+
+
+def test_with_stop_locked_down_a_viewer_can_still_stop_and_anonymous_cannot():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            assert "Log in" in (await ask(ws, action="OPERATOR_STOP", robot="a"))["error"]
+            await as_user(ws, "vic")
+            assert (await ask(ws, action="OPERATOR_STOP", robot="a"))["type"] == "ack"
+    team(go, stop_requires_login=True)
+
+
+def test_an_admin_manages_users_and_passwords_stay_out_of_the_log():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await as_user(ws, "admin")
+            reply = await ask(ws, action="USER_ADD", name="new.one", password="another password", role="viewer")
+            assert "new.one" in [u["name"] for u in reply["users"]]
+            await ask(ws, action="USER_ROLE", name="new.one", role="operator")
+            await ask(ws, action="USER_PASSWORD", name="new.one", password="a third password")
+            await ask(ws, action="USER_REMOVE", name="new.one")
+            for bad in ({"action": "USER_ADD", "name": "Bad Name", "password": PASSWORD, "role": "viewer"},
+                        {"action": "USER_ADD", "name": "ok", "password": "short", "role": "viewer"},
+                        {"action": "USER_ADD", "name": "vic", "password": PASSWORD, "role": "viewer"},
+                        {"action": "USER_ADD", "name": "ok", "password": PASSWORD, "role": "king"},
+                        {"action": "USER_REMOVE", "name": "nobody"}):
+                assert (await ask(ws, **bad))["type"] == "error", bad
+        text = json.dumps(audit.rows())
+        assert "another password" not in text and "third password" not in text
+        assert [r["command"] for r in audit.commands() if r["kind"] == "command"] == \
+            ["USER_ADD", "USER_ROLE", "USER_PASSWORD", "USER_REMOVE"]
+    team(go)
+
+
+def test_the_last_admin_stays():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await as_user(ws, "admin")
+            assert "last admin" in (await ask(ws, action="USER_REMOVE", name="admin"))["error"]
+            assert "last admin" in (await ask(ws, action="USER_ROLE", name="admin", role="viewer"))["error"]
+            await ask(ws, action="USER_ROLE", name="olive", role="admin")
+            assert (await ask(ws, action="USER_ROLE", name="admin", role="viewer"))["type"] == "users"
+    team(go)
+
+
+def test_a_removed_user_loses_their_session_at_once():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as admin, connect(url) as ws:
+            await as_user(admin, "admin")
+            await as_user(ws, "olive")
+            assert (await ask(ws, action="PAUSE", robot="a"))["type"] == "ack"
+            await ask(admin, action="USER_REMOVE", name="olive")
+            assert (await ask(ws, action="PAUSE", robot="a"))["type"] == "error"
+    team(go)
+
+
+def test_a_role_change_applies_at_once():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as admin, connect(url) as ws:
+            await as_user(admin, "admin")
+            await as_user(ws, "olive")
+            await ask(admin, action="USER_ROLE", name="olive", role="viewer")
+            assert "operator" in (await ask(ws, action="PAUSE", robot="a"))["error"]
+    team(go)
+
+
+def test_control_off_stops_a_drive_refuses_everything_and_on_brings_it_back():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as admin:
+            await as_user(admin, "admin")
+            await admin.send(json.dumps({"action": "TELEOP", "robot": "a", "linear": 0.3, "angular": 0}))
+            await ask(admin, action="SWITCHES", control=False)
+            assert sink.vel[-1][1:] == (0.0, 0.0)
+            for msg in ({"action": "PAUSE", "robot": "a"}, {"action": "OPERATOR_STOP", "robot": "a"}, {"action": "OPERATOR_STOP_ALL"}):
+                assert (await ask(admin, **msg))["error"] == "Robot control is off."
+            await ask(admin, action="SWITCHES", control=True)
+            assert (await ask(admin, action="PAUSE", robot="a"))["type"] == "ack"
+    team(go)
+
+
+def test_anonymous_viewing_off_sends_a_stranger_nothing():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as admin, connect(url) as stranger:
+            await as_user(admin, "admin")
+            await ask(admin, action="SWITCHES", anonymous_view=False)
+
+            async def nothing_about_robots(ws, seconds=2.5):
+                got = []
+                try:
+                    async with asyncio.timeout(seconds):
+                        while True:
+                            got.append(json.loads(await ws.recv()))
+                except TimeoutError:
+                    pass
+                return got
+
+            first = await nothing_about_robots(stranger)
+            assert any(m["type"] == "hello" and m.get("locked") and m["robots"] == [] for m in first)
+            after = first[[i for i, m in enumerate(first) if m.get("locked")][-1] + 1:]
+            assert not [m for m in after if m["type"] in ("snapshot", "fleet", "event", "activity")]
+
+            async with connect(url) as late:
+                seen = await nothing_about_robots(late, 1.5)
+                assert [m["type"] for m in seen if m["type"] != "switches"] == ["hello"]
+                assert (await ask(late, action="SELECT", topic="/x"))["type"] == "error"
+                assert "Log in" in (await ask(late, action="OPERATOR_STOP", robot="a"))["error"]
+                await as_user(late, "vic")
+                kinds = {m["type"] for m in await nothing_about_robots(late, 1.5)}
+                assert "fleet" in kinds
+                await ask(late, action="LOGOUT")
+                await asyncio.sleep(0.1)
+                while True:  # drain what was in flight, then silence
+                    try:
+                        async with asyncio.timeout(0.05):
+                            await late.recv()
+                    except TimeoutError:
+                        break
+                assert not [m for m in await nothing_about_robots(late, 1.5) if m["type"] in ("snapshot", "fleet")]
+    team(go)
+
+
+def test_switches_survive_a_restart(tmp_path):
+    path = str(tmp_path / "switches.json")
+    s = Switches(path)
+    s.control, s.anonymous_view = False, False
+    s.save()
+    again = Switches(path)
+    assert not again.control and not again.anonymous_view
+
+
+def test_an_old_admin_password_becomes_the_admin_account(tmp_path):
+    from styri_bridge.control.auth import hash_password
+    (tmp_path / "admin.hash").write_text(hash_password(PASSWORD))
+    accounts = Accounts(str(tmp_path / "users.json"), env={})
+    assert accounts.check("c", "admin", PASSWORD).role == "admin"
+    assert not (tmp_path / "admin.hash").exists()
+
+
+def test_the_terminal_tool_and_a_running_panel_share_accounts(tmp_path, capsys, monkeypatch):
+    import io
+    from styri_bridge.control import users_cli
+    path = str(tmp_path / "users.json")
+    panel = Accounts(path, env={"STYRI_ADMIN_PASSWORD": PASSWORD})
+    run = lambda *a: users_cli.main(["--file", path, *a])  # noqa: E731
+    monkeypatch.setattr("sys.stdin", io.StringIO("a good password\n"))
+    assert run("add", "m.lind", "--role", "operator", "--password-stdin") == 0
+    assert panel.get("m.lind").role == "operator"
+    assert run("role", "m.lind", "viewer") == 0 and panel.get("m.lind").role == "viewer"
+    assert run("list") == 0 and "m.lind" in capsys.readouterr().out
+    assert run("remove", "admin") == 1 and "last admin" in capsys.readouterr().err
+    assert run("remove", "m.lind") == 0 and panel.get("m.lind") is None
