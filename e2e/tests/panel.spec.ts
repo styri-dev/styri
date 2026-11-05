@@ -139,6 +139,8 @@ test.describe("at 768 px", () => {
   test.use({ viewport: { width: 768, height: 1024 } });
 
   test("overview tiles lay out 3 + 2", async ({ page }) => {
+    // "Connected" can come before the first snapshot, and evaluateAll doesn't wait.
+    await expect(page.locator(".tile")).toHaveCount(5);
     const tops = await page.locator(".tile").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
     expect(tops).toHaveLength(5);
     expect(new Set(tops.slice(0, 3)).size).toBe(1);
