@@ -1,4 +1,5 @@
-import type { Hello, MappingRow, MappingStatus, Snapshot } from "../bridge";
+import type { PanelContext } from "../App";
+import type { MappingRow, MappingStatus } from "../bridge";
 import { shown } from "../format";
 
 const STATUS: Record<MappingStatus, { word: string; cls: string }> = {
@@ -32,18 +33,24 @@ function Row({ r }: { r: MappingRow }) {
   );
 }
 
-export function Configuration({ snap, hello }: { snap?: Snapshot; hello?: Hello }) {
-  if (!snap || !hello) return <p className="empty">Waiting for the bridge…</p>;
+export function Configuration({ ctx }: { ctx: PanelContext }) {
+  const { state, ui } = ctx;
+  const hello = state.hello;
+  const robots = hello?.robots ?? [];
+  const robot = robots.find((r) => r.name === ui.sel) ?? robots[0];
+  const snap = state.snapshots[robot?.index ?? 0];
+  if (!snap || !hello) return <p className="waiting">Waiting for the bridge…</p>;
   const c = hello.config;
   const fromFile = !!c && c.source !== "environment";
   const rows = snap.mappings ?? [];
   const failing = rows.filter((r) => r.status === "missing" || r.status === "error").length;
 
   return (
-    <div className="page page--narrow config">
-      <section className="card">
-        <div className="card__head">
-          <span className="card__title">CONFIGURATION</span>
+    <div className="config">
+      <span className="page-title">Configuration</span>
+      <section className="cfg">
+        <div className="cfg__head">
+          <span className="microlabel">CONFIGURATION</span>
           <span className="text-3 small">Read-only. Change styri.yaml and restart Styri.</span>
         </div>
         <dl className="kv">
@@ -52,9 +59,9 @@ export function Configuration({ snap, hello }: { snap?: Snapshot; hello?: Hello 
             {fromFile ? c!.source : "Environment variables (no styri.yaml)"}
           </dd>
           <dt>Styri</dt><dd className="mono">v{hello.version}</dd>
-          <dt>Robot</dt><dd className="mono">{hello.robot}</dd>
-          <dt>Namespace</dt><dd className="mono">{c?.namespace ?? "none"}</dd>
-          <dt>ROS domain</dt><dd className="mono">{c?.domain ?? hello.domain}</dd>
+          <dt>Robot</dt><dd className="mono">{robot?.name ?? hello.robot}</dd>
+          <dt>Namespace</dt><dd className="mono">{robot?.namespace ?? c?.namespace ?? "none"}</dd>
+          <dt>ROS domain</dt><dd className="mono">{robot?.domain ?? c?.domain ?? hello.domain}</dd>
           <dt>Stale after</dt>
           <dd><span className="mono">{c?.stale_after ?? hello.stale_after} s</span>
             <span className="text-3"> · custom fields have their own, 3 s unless set</span></dd>
@@ -68,9 +75,9 @@ export function Configuration({ snap, hello }: { snap?: Snapshot; hello?: Hello 
         {c?.notes.map((n) => <p key={n} className="config__note">{n}</p>)}
       </section>
 
-      <section className="card">
-        <div className="card__head">
-          <span className="card__title">MAPPINGS</span>
+      <section className="cfg">
+        <div className="cfg__head">
+          <span className="microlabel">MAPPINGS</span>
           <span className="text-3 small">
             {failing ? `${failing} not working` : `${rows.length} mapped, all coming through`}
           </span>

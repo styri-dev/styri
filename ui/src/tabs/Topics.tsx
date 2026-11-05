@@ -1,76 +1,76 @@
 import { useEffect, useState } from "react";
-import type { Snapshot, TopicMessage, TopicRow } from "../bridge";
+import type { PanelContext } from "../App";
+import type { TopicRow } from "../bridge";
 import { ageText } from "../format";
 
-function lastMsg(row: TopicRow, disc: boolean, discAge: number): string {
-  if (!row.supported) return "not readable";
-  if (disc) return ageText(discAge + (row.age ?? 0));
-  if (row.age == null) return "idle";
-  if (row.stale) return ageText(row.age);
-  return row.age < 0.1 ? "< 0.1 s" : `${row.age.toFixed(1)} s`;
+function flag(row: TopicRow, disc: boolean, drives: boolean): { text: string; tone: string } {
+  if (!row.supported) return { text: "not readable", tone: "text-3" };
+  if (drives && row.name.endsWith("cmd_vel")) return { text: "Styri", tone: "link" };
+  if (disc) return { text: "", tone: "text-3" };
+  if (row.stale && row.age != null) return { text: `STALE · ${ageText(row.age)}`, tone: "text-3" };
+  return { text: "", tone: "text-3" };
 }
 
-export function Topics(props: {
-  snap?: Snapshot;
-  disc: boolean;
-  discAge: number;
-  message?: TopicMessage;
-  robot?: number;
-  select: (topic: string, robot?: number) => void;
-}) {
-  const { snap, disc, discAge, message, select, robot = 0 } = props;
-  const [picked, setPicked] = useState<string | null>(null);
+export function Topics({ ctx }: { ctx: PanelContext }) {
+  const { state, ui, disc, select } = ctx;
+  const ros = (state.hello?.robots ?? []).filter((r) => (r.protocol ?? "ros2") === "ros2");
+  const [choice, setChoice] = useState<number | null>(null);
+  const picked = ros.find((r) => r.index === choice) ?? ros.find((r) => r.name === ui.sel) ?? ros[0];
+  const robot = picked?.index ?? 0;
+  const snap = state.snapshots[robot];
   const topics = snap?.topics ?? [];
-  const sel = topics.find((t) => t.name === picked)?.name
-    ?? topics.find((t) => t.name.includes("battery"))?.name ?? topics[0]?.name;
+  const model = state.fleet.find((r) => r.index === robot);
+  const [open, setOpen] = useState<string | null>(null);
+  const message = state.message && (state.message.robot_index ?? 0) === robot && state.message.topic === open ? state.message : undefined;
 
   // Refresh the latest message while it is on screen.
   useEffect(() => {
-    if (!sel || disc) return;
-    select(sel, robot);
-    const t = setInterval(() => select(sel, robot), 1000);
+    if (!open || disc) return;
+    select(open, robot);
+    const t = setInterval(() => select(open, robot), 1000);
     return () => clearInterval(t);
-  }, [sel, disc, select, robot]);
+  }, [open, disc, select, robot]);
 
-  if (!snap) return <p className="empty">Waiting for the bridge…</p>;
-  const selRow = topics.find((t) => t.name === sel);
-  const shown = message && message.topic === sel ? message : undefined;
-
+  if (!picked) {
+    return <div className="topics"><div className="topics__head"><span className="page-title">Topics</span><span className="small text-2">ROS 2 robots only. This fleet has none.</span></div></div>;
+  }
   return (
-    <div className={`page topics ${disc ? "is-dim" : ""}`}>
-      <section className="card topics__list">
-        <div className="card__head">
-          <span className="card__title">{topics.length} TOPICS DISCOVERED</span>
-          <span className="text-3 small">Stale after 5 s · tap a row for the latest message</span>
+    <div className="topics">
+      <div className="topics__head">
+        <span className="page-title">Topics</span>
+        <span className="small text-2">ROS 2 robots only · <span className="mono">{picked.name}</span> · domain {picked.domain}</span>
+        {ros.length > 1 && (
+          <label className="filter">
+            <span className="text-3">Robot</span><b>{picked.name}</b><span className="text-3">▾</span>
+            <select aria-label="Robot" value={robot} onChange={(e) => setChoice(Number(e.target.value))}>
+              {ros.map((r) => <option key={r.index} value={r.index}>{r.name}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      <div className="ttable">
+        <div className="ttable__in">
+          <div className="trow trow--head"><span>TOPIC</span><span>TYPE</span><span>RATE</span><span /></div>
+          {topics.map((row) => {
+            const f = flag(row, disc, !!model?.capabilities.can_teleop);
+            return (
+              <div key={row.name} className="trow__wrap">
+                <button type="button" className={`trow ${row.name === open ? "is-selected" : ""}`} aria-expanded={row.name === open} data-topic={row.name}
+                  onClick={() => setOpen(row.name === open ? null : row.name)}>
+                  <span className="strong break">{row.name}</span>
+                  <span className="text-2 break">{row.type}</span>
+                  <span className="num">{!row.supported || disc || row.hz === 0 ? "—" : `${row.hz.toFixed(row.hz >= 100 ? 0 : 1)} Hz`}</span>
+                  <span className={`tone-${f.tone}`}>{f.text}</span>
+                </button>
+                {row.name === open && (
+                  <pre className="message" aria-live="polite">{message?.text ?? message?.note ?? message?.error ?? "Loading…"}</pre>
+                )}
+              </div>
+            );
+          })}
+          {topics.length === 0 && <p className="atable__none">No topics yet. Discovery runs every 2 s.</p>}
         </div>
-        <div className="trow trow--head" role="row">
-          <span>NAME</span><span>TYPE</span><span className="num">RATE</span><span className="num">LAST MSG</span>
-        </div>
-        {topics.map((row) => {
-          const stale = disc || row.stale;
-          return (
-            <button key={row.name} type="button" className={`trow ${row.name === sel ? "is-selected" : ""}`}
-              onClick={() => setPicked(row.name)} data-topic={row.name}>
-              <span className="mono trow__name">{row.name}</span>
-              <span className="mono trow__type">{row.type}</span>
-              <span className="mono num">{!row.supported ? "—" : disc ? "0.0" : row.hz.toFixed(1)}</span>
-              <span className={`mono num ${stale ? "warn-fg strong" : "text-2"}`}>{lastMsg(row, disc, discAge)}</span>
-            </button>
-          );
-        })}
-        {topics.length === 0 && <p className="empty">No topics yet. Discovery runs every 2 s.</p>}
-      </section>
-
-      <section className="card topics__detail" aria-live="polite">
-        <div className="card__head card__head--stack">
-          <span className="card__title">LATEST MESSAGE</span>
-          <span className="mono strong break">{sel ?? "—"}</span>
-          {selRow && <span className="mono small text-3">{selRow.type} · {selRow.hz.toFixed(1)} Hz</span>}
-        </div>
-        <pre className="message">
-          {!sel ? "Pick a topic." : shown?.text ?? shown?.note ?? shown?.error ?? "Loading…"}
-        </pre>
-      </section>
+      </div>
     </div>
   );
 }

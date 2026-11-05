@@ -17,6 +17,7 @@ export interface Hello {
   not_shown?: NotShown[];
   site?: Site;
   control?: ControlStatus; // absent with control off: the panel is view-only
+  locked?: boolean; // a login comes before any data
 }
 
 export type Protocol = "ros2" | "vda5050";
@@ -29,13 +30,42 @@ export interface NotShown {
   link: string;
 }
 
+export type Role = "viewer" | "operator" | "admin";
+
 export interface ControlStatus {
   enabled: boolean;
+  available?: boolean;
   logged_in: boolean;
+  user?: { name: string; role: Role } | null;
   needs_setup: boolean;
   session_hours: number;
   stop_requires_login: boolean;
+  anonymous_view?: boolean;
 }
+
+export interface Account {
+  name: string;
+  role: Role;
+  last_login: number | null; // unix seconds
+  active: boolean; // has a session open now
+}
+
+/** The last command sent to a robot, and how far it has got. */
+export interface Command {
+  id: number;
+  action: "GOAL" | "PAUSE" | "RESUME" | "CANCEL" | "OPERATOR_STOP";
+  user: string;
+  at: number; // unix seconds
+  node: string | null;
+  point: [number, number] | null;
+  status: string; // sent, accepted, running, done, rejected, failed, cancelled, not_confirmed; a stop's own words for a stop
+  steps: string[];
+  reason: string | null;
+}
+
+export type StopStatus = "sent" | "stopped" | "no_reply" | "not_confirmed" | "cant_confirm";
+export interface StopAllRun { id: number; robots: Record<string, StopStatus> }
+export interface Broker { connected: boolean; url: string; unconfigured: string[] }
 
 export interface Capabilities {
   can_teleop: boolean;
@@ -68,16 +98,24 @@ export interface RobotModel {
   warnings: string[];
   last_seen: number | null; // unix seconds
   stale: boolean;
+  online: boolean | null; // null: this protocol doesn't say
   pose: Pose | null;
   velocity: { linear: number; angular: number } | null;
   driving: boolean | null;
   paused: boolean;
-  task: { id: string | null; state: "idle" | "active" | "paused" | "failed" | "done"; last_node: string | null; route: string[] };
+  paused_by: string | null;
+  driver: string | null; // who's holding the joystick
+  off_graph: number | null; // metres from the route
+  mode: string | null;
+  load: number | null;
+  task: { id: string | null; state: "idle" | "active" | "paused" | "failed" | "done"; last_node: string | null; route: string[]; nodes_total: number };
   capabilities: Capabilities;
   limits: { max_linear: number; max_angular: number };
   points: string[];
   vehicle_stop: boolean;
-  stop: "sent" | "stopped" | "no_reply" | "not_confirmed" | "cant_confirm" | null; // the last Operator stop
+  stop: StopStatus | null; // the last Operator stop
+  stop_at: number | null; // unix seconds it stood still
+  command: Command | null;
   factsheet: Record<string, any> | null;
 }
 
@@ -86,10 +124,18 @@ export interface GraphNode {
   x: number;
   y: number;
   map_id: string;
+  name?: string;
+}
+
+export interface GraphEdge {
+  id: string;
+  start: string;
+  end: string;
+  directed?: boolean;
 }
 
 export interface Site {
-  graph: { nodes: GraphNode[]; edges: { id: string; start: string; end: string }[] } | null;
+  graph: { nodes: GraphNode[]; edges: GraphEdge[] } | null;
   background: { url: string; scale: number; origin: [number, number] } | null;
   version: string | null; // changes with the graph: a stale save is refused
   editable: boolean; // site.graph is set, so the editor has a file to save
@@ -106,6 +152,8 @@ export interface AuditRow {
   robot?: string | null;
   reason?: string;
   payload?: Record<string, unknown>;
+  status?: string; // as in Command; "refused" never reached the robot
+  steps?: string[];
 }
 
 /** Where the topic mapping came from (hello.config). */
@@ -218,8 +266,17 @@ export interface BridgeState {
   fleet: RobotModel[];
   control?: ControlStatus;
   authError?: string;
-  notice?: { text: string; robot?: string | null; at: number }; // the bridge refused a command
+  notice?: { text: string; action?: string; robot?: string | null; at: number }; // the bridge refused a command
   audit: AuditRow[];
+  users: Account[];
+  site?: string | null; // the site's name, from styri.yaml
+  broker?: Broker | null;
+  stopAll?: StopAllRun | null;
+  sessionEndsAt?: number; // Date.now() the session ends, when that's soon
+  attempts: number; // reconnect tries since the bridge went away
+  frozenAt?: number; // Date.now() of the last data before it did
+  notShown: NotShown[];
+  lastAck?: { action?: string; at: number };
 }
 
 const NO_HISTORY: History = { cpuTemp: [], load: [] };
@@ -242,7 +299,7 @@ export function bridgeUrl(): string {
 }
 
 export function useBridge(url: string) {
-  const [state, setState] = useState<BridgeState>({ conn: "connecting", events: [], snapshots: {}, snapshotAt: {}, history: {}, fleet: [], audit: [] });
+  const [state, setState] = useState<BridgeState>({ conn: "connecting", events: [], snapshots: {}, snapshotAt: {}, history: {}, fleet: [], audit: [], users: [], attempts: 0, notShown: [] });
   const wsRef = useRef<WebSocket | null>(null);
   const connectNow = useRef<() => void>(() => {});
 
@@ -261,7 +318,7 @@ export function useBridge(url: string) {
 
       ws.onopen = () => {
         backoff = 1000;
-        setState((s) => ({ ...s, conn: "open" }));
+        setState((s) => ({ ...s, conn: "open", attempts: 0, frozenAt: undefined }));
         const sendPing = () => ws.readyState === WebSocket.OPEN &&
           ws.send(JSON.stringify({ action: "PING", t: performance.now() }));
         sendPing();
@@ -278,10 +335,20 @@ export function useBridge(url: string) {
         }
         switch (msg.type) {
           case "hello":
-            setState((s) => ({ ...s, hello: msg, control: msg.control }));
+            setState((s) => ({ ...s, hello: msg, control: msg.control, notShown: msg.not_shown ?? s.notShown,
+              ...(msg.locked ? { fleet: [], snapshots: {}, snapshotAt: {}, events: [], audit: [], users: [] } : {}) }));
             break;
           case "fleet":
-            setState((s) => ({ ...s, fleet: msg.robots }));
+            setState((s) => ({ ...s, fleet: msg.robots, site: msg.site, broker: msg.broker, stopAll: msg.stop_all, notShown: msg.not_shown ?? s.notShown }));
+            break;
+          case "switches": // an admin flipped one: every panel follows at once
+            setState((s) => ({ ...s, control: s.control && { ...s.control, enabled: msg.enabled, anonymous_view: msg.anonymous_view } }));
+            break;
+          case "users":
+            setState((s) => ({ ...s, users: msg.users, control: msg.control ?? s.control, notice: undefined }));
+            break;
+          case "session":
+            setState((s) => ({ ...s, sessionEndsAt: msg.ends_in == null ? undefined : Date.now() + msg.ends_in * 1000 }));
             break;
           case "site": // someone saved the node graph
             setState((s) => ({ ...s, hello: s.hello && { ...s.hello, site: msg.site } }));
@@ -289,13 +356,13 @@ export function useBridge(url: string) {
           case "auth":
             // The cookie is HttpOnly, so the bridge sets it: a reload stays logged in.
             if (msg.ticket) void fetch(`/api/session?ticket=${encodeURIComponent(msg.ticket)}`, { cache: "no-store" });
-            setState((s) => ({ ...s, control: msg.control, authError: msg.error }));
+            setState((s) => ({ ...s, control: msg.control, authError: msg.error, sessionEndsAt: undefined }));
             break;
           case "error":
-            if (msg.action !== "AUDIT") setState((s) => ({ ...s, notice: { text: msg.error, robot: msg.robot, at: Date.now() } }));
+            if (msg.action !== "AUDIT") setState((s) => ({ ...s, notice: { text: msg.error, action: msg.action, robot: msg.robot, at: Date.now() } }));
             break;
           case "ack":
-            setState((s) => ({ ...s, notice: undefined }));
+            setState((s) => ({ ...s, notice: undefined, lastAck: { action: msg.action, at: Date.now() } }));
             break;
           case "audit":
             setState((s) => ({ ...s, audit: msg.rows }));
@@ -331,7 +398,7 @@ export function useBridge(url: string) {
         clearInterval(ping);
         if (closed || wsRef.current !== ws) return; // unmounted, or replaced by "Retry now"
         wsRef.current = null;
-        setState((s) => ({ ...s, conn: "closed", latencyMs: undefined, retryAt: Date.now() + backoff }));
+        setState((s) => ({ ...s, conn: "closed", latencyMs: undefined, retryAt: Date.now() + backoff, attempts: s.attempts + 1, frozenAt: s.frozenAt ?? Date.now() }));
         retry = setTimeout(connect, backoff);
         backoff = Math.min(backoff * 2, 10_000);
       };

@@ -23,7 +23,7 @@ three.
 
 ## "Mapped values aren't coming through"
 
-The Overview banner and the Configuration tab say which mapping and why:
+The robot page's banner and the Configuration page (in the menu) say which mapping and why:
 
 - **Not found:** the topic isn't on the network. Check the name and the
   namespace (relative names get `robot.namespace` in front); the close matches
@@ -33,7 +33,7 @@ The Overview banner and the Configuration tab say which mapping and why:
   whole latest message.
 - **Waiting:** on the network, but nothing published yet.
 - **Configuration file not used:** the file has a mistake, so none of it
-  applies. The Configuration tab and `styri check` list every problem with the
+  applies. The Configuration page and `styri check` list every problem with the
   key it's in.
 
 ## Topics appear but never get data
@@ -63,7 +63,7 @@ docker run -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri
 ```
 
 Below that, the Voltage tile turns amber, the status shows "Battery voltage
-low", and the Activity log records "Voltage below 23.0 V". The warning
+low", and Activity records "Voltage below 23.0 V". The warning
 clears once the voltage is 0.2 V above the threshold, so it doesn't flicker
 on and off at the limit.
 

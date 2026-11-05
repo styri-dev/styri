@@ -54,7 +54,7 @@ amr-01 (namespace /robot1, domain 0)
   FAIL  Speed                /robot1/odom · twist.linear.x  Can't read the value: no field “linear” (it has: twist, covariance).
 ```
 
-The panel says the same: a banner on the Overview names any mapped value that
+The panel says the same: a banner on the robot page names any mapped value that
 isn't coming through, and the **Configuration** tab lists where the mapping
 came from, the Styri version and every mapping with its status.
 
@@ -100,7 +100,7 @@ status:                       # the robot's own status, shown as a tile
   # stale_after: false        # for topics that publish only on change: never stale
 
 diagnostics:
-  topic: diagnostics          # default; WARN and ERROR entries show on the Overview; false to ignore
+  topic: diagnostics          # default; WARN and ERROR entries show on the robot page; false to ignore
 
 fields:                       # up to 5 more tiles
   - label: Motor current
@@ -345,7 +345,7 @@ robots:
     battery: {warn_below: 40}  # this robot docks earlier
 ```
 
-Styri Core shows the first robot (the Configuration tab says so); Styri Pilot
+Styri Core shows the first robot (the Configuration page says so); Styri Pilot
 shows up to five, with a fleet view. A single-robot file works unchanged in
 both.
 

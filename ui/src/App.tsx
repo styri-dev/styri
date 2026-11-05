@@ -1,54 +1,85 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { type BridgeState, bridgeUrl, forRobot, useBridge, useNow } from "./bridge";
-import { clock } from "./format";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type BridgeState, bridgeUrl, useBridge, useNow } from "./bridge";
+import { Banners, Header, StopAllBanner } from "./control/Header";
+import { RobotCard } from "./control/RobotCard";
 import { Activity } from "./tabs/Activity";
 import { Configuration } from "./tabs/Configuration";
-import { Login, StopAll } from "./control/Header";
-import { RobotDetail } from "./control/RobotDetail";
-import { RobotSwitcher } from "./RobotSwitcher";
+import { Empty } from "./tabs/Empty";
 import { Fleet } from "./tabs/Fleet";
-import { Overview } from "./tabs/Overview";
+import { Login } from "./tabs/Login";
+import { RobotPage } from "./tabs/RobotPage";
 import { SiteMap } from "./tabs/SiteMap";
 import { Topics } from "./tabs/Topics";
+import { Users } from "./tabs/Users";
+import { type Access, accessOf, type RobotView, robotView, sorted } from "./view";
 
 const URL = bridgeUrl();
-const TABS = [
-  ["overview", "Overview"],
-  ["topics", "Topics"],
-  ["activity", "Activity log"],
-  ["configuration", "Configuration"],
-] as const;
-// Shorter labels where the tab bar is narrow.
-const SHORT: Partial<Record<string, string>> = { activity: "Activity", configuration: "Config" };
+export const TABS = [["fleet", "Fleet"], ["map", "Map"], ["activity", "Activity"], ["topics", "Topics"]] as const;
+const PHONE = 640;
+const WIDE = 1280; // the fleet list beside the map
+
+export type View = "fleet" | "map" | "activity" | "topics" | "robot" | "login" | "users" | "configuration";
+
+/** Send to…: tap the map, then confirm. */
+export interface SendPlan {
+  step: "pick" | "confirm";
+  dest?: string;
+  via?: string;
+  node?: string;
+  point?: [number, number];
+  path?: [number, number][]; // site metres
+}
+
+export interface PanelUi {
+  sel: string | null;
+  select: (name: string | null) => void;
+  send: SendPlan | null;
+  setSend: (s: SendPlan | null) => void;
+  drive: boolean;
+  setDrive: (on: boolean) => void;
+  sheetOpen: boolean;
+  setSheetOpen: (open: boolean) => void;
+  sheetH: number;
+}
 
 /** What an edition built on Styri Core can add to the panel. Core passes none. */
+export interface PanelPlugin {
+  banner?: (ctx: PanelContext) => ReactNode; // under the tabs
+  license?: (ctx: PanelContext) => string | undefined; // the line beside FLEET
+}
+
 export interface PanelContext {
   state: BridgeState;
-  robot: number; // the robot the per-robot tabs show
-  setRobot: (index: number, tab?: string) => void;
   send: (payload: Record<string, unknown>) => void;
+  select: (topic: string, robot?: number) => void;
+  retryNow: () => void;
   now: number;
+  width: number;
+  phone: boolean;
+  wide: boolean;
+  disc: boolean;
+  access: Access;
+  robots: RobotView[]; // sorted for the screen
+  ui: PanelUi;
+  view: View;
+  go: (view: View, id?: string) => void;
+  openMap: (name: string) => void;
+  openRobot: (name: string) => void;
+  hasMap: boolean;
+  noRobots: boolean; // the bridge is up, and no robot has ever reported
+  theme: "dark" | "light";
+  toggleTheme: () => void;
+  setWall: (on: boolean) => void;
+  wall: boolean;
+  plugin: PanelPlugin;
 }
 
-export interface PanelTab {
-  key: string;
-  label: string;
-  short?: string;
-  first?: boolean; // before Overview
-  visible?: (state: BridgeState) => boolean; // e.g. only once the bridge says there's a fleet
-  render: (ctx: PanelContext) => ReactNode;
-}
+interface Route { view: View; id?: string }
 
-export interface PanelPlugin {
-  tabs?: PanelTab[];
-  defaultTab?: string; // used while that tab is visible
-  hideOnPhones?: string[]; // tab keys
-  banner?: (ctx: PanelContext) => ReactNode; // under the tabs
-}
-
-function tabFromHash(keys: string[], fallback: string): string {
-  const h = location.hash.replace("#", "");
-  return keys.includes(h) ? h : fallback;
+function parseRoute(): Route {
+  const [view, id] = location.hash.replace(/^#/, "").split("/");
+  const known: View[] = ["fleet", "map", "activity", "topics", "robot", "login", "users", "configuration"];
+  return known.includes(view as View) && (view !== "robot" || id) ? { view: view as View, id: id && decodeURIComponent(id) } : { view: "fleet" };
 }
 
 // Dark by default; ?theme=light (remembered) for bright rooms.
@@ -62,16 +93,17 @@ function initialTheme(): "dark" | "light" {
   }
 }
 
-export function Logo() {
-  return (
-    <svg viewBox="0 0 32 32" width="26" height="26" className="logo" aria-hidden="true">
-      <rect width="32" height="32" rx="6" fill="var(--text-1)" />
-      <path d="M22 9H11V16H21V23H10" fill="none" stroke="var(--surface-1)" strokeWidth="4" strokeLinecap="square" />
-    </svg>
-  );
+function useWidth(): number {
+  const [w, setW] = useState(window.innerWidth);
+  useEffect(() => {
+    const on = () => setW(window.innerWidth);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return w;
 }
 
-function logout(send: PanelContext["send"]) {
+export function logout(send: PanelContext["send"]) {
   send({ action: "LOGOUT" });
   void fetch("/api/logout", { cache: "no-store" });
 }
@@ -79,140 +111,137 @@ function logout(send: PanelContext["send"]) {
 export function App({ plugin = {} }: { plugin?: PanelPlugin }) {
   const { state, select, send, retryNow } = useBridge(URL);
   const now = useNow();
-  const extra = (plugin.tabs ?? []).filter((t) => !t.visible || t.visible(state));
-  // With several robots (or some not shown), the fleet comes first; the map when there's one to draw.
-  const manyRobots = (state.hello?.robots?.length ?? 0) > 1 || (state.hello?.not_shown?.length ?? 0) > 0;
-  const hasMap = !!(state.hello?.site?.graph || state.hello?.site?.background || state.fleet.some((r) => r.pose));
-  const tabs: { key: string; label: string; short?: string }[] = [
-    ...(manyRobots ? [{ key: "fleet", label: "Fleet" }] : []),
-    ...(hasMap ? [{ key: "map", label: "Map" }] : []),
-    ...extra.filter((t) => t.first),
-    ...TABS.map(([key, label]) => ({ key, label, short: SHORT[key] })),
-    ...extra.filter((t) => !t.first),
-  ];
-  const keys = tabs.map((t) => t.key);
-  const fallback = plugin.defaultTab && keys.includes(plugin.defaultTab) ? plugin.defaultTab
-    : keys.includes("fleet") ? "fleet" : "overview";
-  const [tab, setTab] = useState(() => tabFromHash(keys, fallback));
-  const [robot, setRobotIndex] = useState(0);
-  const [theme] = useState(initialTheme);
-  const [loginOpen, setLoginOpen] = useState(false);
+  const width = useWidth();
+  const phone = width < PHONE, wide = width >= WIDE;
+  const [route, setRoute] = useState(parseRoute);
+  const [from, setFrom] = useState<View>("fleet"); // where the robot page and login go back to
+  const [theme, setTheme] = useState(initialTheme);
+  const [wall, setWall] = useState(() => new URLSearchParams(location.search).has("wall"));
+  const [sel, setSel] = useState<string | null>(null);
+  const [plan, setPlan] = useState<SendPlan | null>(null);
+  const [drive, setDrive] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetH, setSheetH] = useState(0);
+  const sheetRef = useRef<HTMLElement | null>(null);
 
-  const keyList = keys.join(",");
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash(keyList.split(","), fallback));
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, [keyList, fallback]);
-  // A tab that appears (or goes) once the bridge says hello: follow it unless the URL picked one.
+    const on = () => setRoute(parseRoute());
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   useEffect(() => {
-    setTab(tabFromHash(keyList.split(","), fallback));
-  }, [keyList, fallback]);
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+    if (!wall) return;
+    const on = (e: KeyboardEvent) => e.key === "Escape" && setWall(false);
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, [wall]);
 
-  const setRobot = (index: number, toTab?: string) => {
-    setRobotIndex(index);
-    if (toTab) location.hash = toTab;
+  const go = useCallback((view: View, id?: string) => {
+    setPlan(null);
+    setDrive(false);
+    if (view === "robot" || view === "login") setFrom((f) => (route.view === "robot" || route.view === "login" ? f : route.view));
+    location.hash = id ? `${view}/${encodeURIComponent(id)}` : view;
+  }, [route.view]);
+
+  const access = useMemo(() => accessOf(state.control), [state.control]);
+  const robots = useMemo(() => sorted(state.fleet.map((r) => robotView(r, { state, now, name: access.name }))), [state, now, access.name]);
+  const site = state.hello?.site;
+  const hasMap = !!(site?.graph || site?.background);
+
+  const pick = useCallback((name: string | null) => {
+    setSel(name);
+    setPlan(null);
+    setDrive(false);
+    setSheetOpen(false);
+  }, []);
+  const ui: PanelUi = { sel, select: pick, send: plan, setSend: setPlan, drive, setDrive, sheetOpen, setSheetOpen, sheetH };
+
+  const noRobots = !!state.hello && state.fleet.length > 0 && state.fleet.every((r) => r.last_seen == null && r.online !== true);
+  const view = route.view === "users" && !access.admin ? "fleet"
+    : route.view === "login" && state.hello && (!access.auth || (access.loggedIn && access.role !== "viewer")) ? from
+    : route.view;
+  // Logged in from #login: the address follows, so a reload doesn't land back there.
+  useEffect(() => {
+    if (route.view === "login" && view !== "login") {
+      history.replaceState(null, "", `#${view}`);
+      setRoute({ view });
+    }
+  }, [route.view, view]);
+  const disc = state.conn !== "open";
+  const openRobot = (name: string) => { setSel(name); go("robot", name); };
+  const openMap = (name: string) => {
+    if (!hasMap) return openRobot(name); // nothing to show it on
+    pick(name);
+    go("map");
   };
-  const view = forRobot(state, robot);
+  const ctx: PanelContext = {
+    state, send, select, retryNow, now, width, phone, wide, disc, access, robots, ui, view, go, openMap, openRobot, hasMap, noRobots,
+    theme, toggleTheme: () => setTheme((t) => {
+      const next = t === "dark" ? "light" : "dark";
+      try { localStorage.setItem("styri.theme", next); } catch { /* private window */ }
+      return next;
+    }), setWall, wall, plugin,
+  };
 
-  // When did we last have the bridge? Drives "No data for N s".
-  const lostAt = useRef<number | null>(null);
-  const disc = state.conn !== "open" && view.snapshot !== undefined;
-  if (disc && lostAt.current === null) lostAt.current = now;
-  if (!disc) lostAt.current = null;
-  const discAge = lostAt.current === null ? 0 : (now - (view.snapshotAt ?? lostAt.current)) / 1000;
+  // The card shows on the map and, with control on, beside the robot page.
+  const detailName = view === "robot" ? route.id : null;
+  const cardRobot = robots.find((v) => v.r.name === (view === "robot" ? detailName : sel));
+  const showCard = !!cardRobot && !wall && ((view === "map" && hasMap) || (view === "robot" && access.control));
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el) { setSheetH(0); return; }
+    const ro = new ResizeObserver(() => setSheetH(Math.round(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [showCard, phone]);
 
-  const snap = view.snapshot;
-  const noRobot = !!snap && !snap.robot_found && !disc;
-  const retryIn = state.retryAt ? Math.max(0, Math.ceil((state.retryAt - now) / 1000)) : 0;
-  const ctx: PanelContext = { state, robot, setRobot, send, now };
-  // The per-robot tabs see the selected robot's name, domain and namespace.
-  const picked = state.hello?.robots?.[robot];
-  const hello = state.hello && robot > 0 && picked
-    ? {
-        ...state.hello, robot: picked.name, domain: picked.domain,
-        config: state.hello.config && { ...state.hello.config, domain: picked.domain, namespace: picked.namespace },
-      }
-    : state.hello;
+  const locked = !!state.hello?.locked;
+  const driving = drive && view === "map" && !!cardRobot;
+  const tabsAt = wall ? null : phone ? (driving ? null : "bottom") : "top";
+  const curTab = view === "robot" || view === "login" ? from : view;
+  const tabBar = (
+    <nav className={`tabs tabs--${tabsAt}`} aria-label="Sections">
+      {TABS.map(([key, label]) => (
+        <a key={key} href={`#${key}`} className={`tab ${curTab === key ? "tab--active" : ""}`} aria-current={curTab === key ? "page" : undefined}
+          onClick={() => { setPlan(null); setDrive(false); }}>{label}</a>
+      ))}
+    </nav>
+  );
 
-  const conn =
-    state.conn === "open"
-      ? noRobot ? { word: "Connected · no robot", cls: "dot--idle" } : { word: "Connected", cls: "dot--live" }
-      : snap ? { word: "Disconnected", cls: "dot--warn" } : { word: "Connecting…", cls: "dot--idle" };
+  if (locked) {
+    return (
+      <div className="app">
+        <Header ctx={ctx} bare />
+        <main className="main"><Login ctx={ctx} locked /></main>
+      </div>
+    );
+  }
+
+  let page: ReactNode;
+  if (!state.hello) page = <p className="waiting">Waiting for the bridge…</p>;
+  else if (view === "login") page = <Login ctx={ctx} />;
+  else if (view === "users") page = <Users ctx={ctx} />;
+  else if (view === "configuration") page = <Configuration ctx={ctx} />;
+  else if (view === "activity") page = <Activity ctx={ctx} />;
+  else if (view === "topics") page = <Topics ctx={ctx} />;
+  else if (view === "robot") page = <RobotPage ctx={ctx} name={route.id!} back={from} />;
+  else if (noRobots) page = <Empty ctx={ctx} />;
+  else if (view === "map") page = <SiteMap ctx={ctx} />;
+  else page = <Fleet ctx={ctx} />;
 
   return (
-    <div className="app">
-      <header className="header">
-        <div className="brand">
-          <Logo />
-          <span className="wordmark">styri</span>
-        </div>
-        <div className="header__rule" />
-        <RobotSwitcher ctx={ctx} />
-        <span className={`field__conn ${disc ? "is-warn" : ""}`} title={`Bridge at ${location.host}`}>
-          <span className={`dot ${conn.cls}`} />
-          {conn.word}
-        </span>
-        <div className="spacer" />
-        <StopAll ctx={ctx} onLogin={() => setLoginOpen(true)} />
-        {state.control?.enabled && (
-          <button type="button" className="chip chip--btn" data-testid="login-toggle"
-            onClick={() => (state.control?.logged_in ? logout(send) : setLoginOpen(true))}>
-            {state.control.logged_in ? "Log out" : "Log in"}
-          </button>
-        )}
-        <span className="chip chip--local">Local only · no cloud</span>
-        <span className="mono header__clock">{clock(new Date(now))}</span>
-      </header>
-
-      <nav className="tabs" aria-label="Sections">
-        {tabs.map(({ key, label, short }) => (
-          <a key={key} href={`#${key}`}
-            className={`tab ${tab === key ? "tab--active" : ""} ${plugin.hideOnPhones?.includes(key) ? "tab--phone-hidden" : ""}`}
-            aria-current={tab === key ? "page" : undefined}>
-            <span className="tab__long">{label}</span>
-            {short && <span className="tab__short">{short}</span>}
-            {key === "configuration" && snap?.mappings?.some((m) => m.status === "missing" || m.status === "error") &&
-              <span className="tab__alert" aria-label="needs attention">▲</span>}
-            {key === "topics" && snap && <span className="tab__note">{snap.topics.length}</span>}
-          </a>
-        ))}
-      </nav>
-
-      {disc && (
-        <div className="banner" role="alert">
-          <span className="banner__glyph">▲</span>
-          <span className="banner__title">Lost connection to bridge — retrying</span>
-          <span className="mono">{state.conn === "connecting" ? "now…" : `in ${retryIn} s`}</span>
-          <div className="spacer" />
-          <button type="button" className="banner__btn" onClick={retryNow}>Retry now</button>
-        </div>
-      )}
+    <div className="app" data-view={view}>
+      <Header ctx={ctx} hideStrip={driving} />
+      {tabsAt === "top" && tabBar}
+      <Banners ctx={ctx} />
       {plugin.banner?.(ctx)}
-      {loginOpen && <Login ctx={ctx} onClose={() => setLoginOpen(false)} />}
-
-      <main className="main">
-        {extra.filter((t) => t.key === tab).map((t) => <div key={t.key}>{t.render(ctx)}</div>)}
-        {tab === "fleet" && <Fleet ctx={ctx} />}
-        {tab === "map" && <SiteMap ctx={ctx} onLogin={() => setLoginOpen(true)} />}
-        {tab === "overview" && (
-          <>
-            <Overview snap={snap} hello={hello} disc={disc} discAge={discAge} noRobot={noRobot}
-              latencyMs={state.latencyMs} protocol={state.hello?.robots?.[robot]?.protocol} />
-            <RobotDetail ctx={ctx} onLogin={() => setLoginOpen(true)} />
-          </>
-        )}
-        {tab === "topics" && (
-          <Topics snap={snap} disc={disc} discAge={discAge} robot={robot}
-            message={state.message && (state.message.robot_index ?? 0) === robot ? state.message : undefined}
-            select={select} />
-        )}
-        {tab === "activity" && <Activity events={state.events} now={now} />}
-        {tab === "configuration" && <Configuration snap={snap} hello={hello} />}
-      </main>
+      <StopAllBanner ctx={ctx} />
+      <div className="main">
+        <div className={`main__page ${disc ? "is-frozen" : ""}`}>{page}</div>
+        {showCard && <RobotCard ref={sheetRef} ctx={ctx} v={cardRobot!} where={view === "robot" ? "detail" : "map"} />}
+      </div>
+      {tabsAt === "bottom" && tabBar}
     </div>
   );
 }

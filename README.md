@@ -52,9 +52,9 @@ Operator stop is a software stop. It is not an emergency stop or a safety functi
 
 ## What you get
 
-- **Overview** — robot status, battery, voltage, CPU temperature and link health, readable at a glance on a touchscreen
+- **Fleet** and **robot page** — each robot's verdict, battery, voltage and CPU temperature, readable at a glance on a touchscreen
 - **Topics** — every discovered topic with its rate and last-message age
-- **Activity log** — a local log of connections, warnings and state changes, exportable to CSV
+- **Activity** — a local log of connections, warnings and state changes, exportable to CSV
 - **Honest data** — every value shows when it goes stale; disconnects are obvious
 
 A fresh install is **view-only**: it never sends anything to your robot. Control is off until you turn it on: see [Control and safety](#control-and-safety).

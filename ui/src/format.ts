@@ -36,3 +36,19 @@ export function download(name: string, text: string, type = "text/csv") {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+/** The panel's address, as the connection line shows it. */
+export const panelHost = () => location.hostname;
+
+export async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch { // plain http on a LAN has no clipboard API
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+}
