@@ -13,6 +13,8 @@ Tested against simulators; real-robot results are added as they're run.
 | Nav2 | `NavigateToPose`, on Jazzy; goals are cancelled through its standard action |
 | Architectures | amd64 and arm64 |
 
+Paused shows only for robots that report it.
+
 ## VDA 5050 field names
 
 Styri follows the specification's text, for every vehicle: `allowedDeviationXY` and

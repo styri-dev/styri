@@ -270,6 +270,29 @@ test("Stop all: a tap does nothing, a one-second hold stops the fleet", async ({
   await expect(page.getByTestId("stop-all-banner")).toContainText("All stopped");
 });
 
+for (const [width, height] of [[1440, 900], [390, 844]]) {
+  test(`driving at ${width} px, the map stops at the floor's edge and the robot stays in view`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await open(page, "amr-01");
+    await login(page);
+    if (width < 768) await page.getByTestId("sheet-grab").click();
+    await page.getByRole("button", { name: "Drive" }).click();
+    await expect(page.getByTestId("joystick")).toBeVisible();
+    const pane = (await page.getByTestId("map-pane").boundingBox())!;
+    const floor = (await page.locator(".sitemap__floor").boundingBox())!;
+    const robot = (await page.locator('.marker[data-robot="amr-01"]').boundingBox())!;
+    if (floor.width > pane.width) { // a floor that fits the pane just sits in the middle
+      expect(floor.x).toBeLessThanOrEqual(pane.x + 16.5);
+      expect(floor.x + floor.width).toBeGreaterThanOrEqual(pane.x + pane.width - 16.5);
+    }
+    const shown = width < 768 ? pane.height * 0.22 : pane.height; // on a phone the joystick covers the rest
+    expect(robot.x).toBeGreaterThanOrEqual(pane.x);
+    expect(robot.x + robot.width).toBeLessThanOrEqual(pane.x + pane.width);
+    expect(robot.y).toBeGreaterThanOrEqual(pane.y);
+    expect(robot.y + robot.height / 2).toBeLessThanOrEqual(pane.y + shown);
+  });
+}
+
 test("at 390 px the joystick is a real touch target and the page doesn't scroll sideways", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page, "amr-01");

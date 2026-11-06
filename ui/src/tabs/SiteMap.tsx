@@ -184,9 +184,10 @@ function MapPane({ ctx }: { ctx: PanelContext }) {
   const focusP = sel?.pose ?? { x: (B.x0 + B.x1) / 2, y: (B.y0 + B.y1) / 2 };
   let ox = (mw - bw * sc) / 2 - B.x0 * sc;
   let oy = (visH - bh * sc) / 2 + B.y1 * sc;
-  if (bw * sc > mw - 16) ox = Math.min(16 - B.x0 * sc, Math.max(mw - 16 - B.x1 * sc, mw / 2 - focusP.x * sc));
-  if (bh * sc > visH - 16) oy = Math.max(visH - 16 + B.y0 * sc, Math.min(16 + B.y1 * sc, visH / 2 + focusP.y * sc));
-  if (drive || sheetOpen) { ox = mw / 2 - focusP.x * sc; oy = visH / 2 + focusP.y * sc; }
+  // Following a robot stops at the floor's edge, unless the robot itself has gone past it.
+  const F = drive || sheetOpen ? { x0: Math.min(B.x0, focusP.x), y0: Math.min(B.y0, focusP.y), x1: Math.max(B.x1, focusP.x), y1: Math.max(B.y1, focusP.y) } : B;
+  if ((F.x1 - F.x0) * sc > mw - 16) ox = Math.min(16 - F.x0 * sc, Math.max(mw - 16 - F.x1 * sc, mw / 2 - focusP.x * sc));
+  if ((F.y1 - F.y0) * sc > visH - 16) oy = Math.max(visH - 16 + F.y0 * sc, Math.min(16 + F.y1 * sc, visH / 2 + focusP.y * sc));
   ox += pan[0];
   oy += pan[1];
   const X = (x: number) => ox + x * sc;
