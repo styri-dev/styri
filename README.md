@@ -4,11 +4,10 @@
 
 Styri — one offline operator panel for ROS 2 and VDA 5050 robots. See, send and stop a mixed fleet from any browser on site. No cloud, no account. Free for up to 3 robots.
 
-<!-- VIDEO PLACEHOLDER: swap the hero below for a GIF made from the 90-second video, linking to the MP4, when the owner sends it. The hero was recorded with v0.3.1 and shows the old panel. -->
 <p align="center">
-  <img src="docs/media/hero.gif" alt="Styri: ROS 2 nodes in a terminal on the left, the Styri operator panel showing live robot status on the right" width="900">
+  <a href="https://styri.dev/video/styri-demo.mp4"><img src="docs/media/demo.gif" alt="Styri panel: send a robot on the map, drive it from the browser, use Operator stop on one robot, then hold Stop all until every robot confirms" width="800"></a>
 </p>
-<p align="center"><sub>[VIDEO] Placeholder: the 90-second demo goes here.</sub></p>
+<p align="center"><sub><a href="https://styri.dev/video/styri-demo.mp4">Watch the 1-minute demo with sound.</a> Simulated robots and site shown.</sub></p>
 
 ## Quickstart
 

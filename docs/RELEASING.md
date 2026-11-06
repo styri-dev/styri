@@ -32,9 +32,6 @@ pull), and only then creates the GitHub release.
       lists linux/amd64 and linux/arm64. (The two "unknown/unknown" entries
       are build attestations.)
 - [ ] The release page exists: `https://github.com/styri-dev/styri/releases/tag/vX.Y.Z`.
-- [ ] **Re-run `docs/media/make-hero.sh`** so the README hero GIF shows the new
-      tag (it records the latest `v*` tag; the image must already be
-      published). Commit `docs/media/hero.gif`.
 - [ ] In styri-pro: pin `core/` to the tag
       (`git -C core fetch --tags && git -C core checkout vX.Y.Z && git add core`)
       and update the quickstart on the website (`site/index.html`) and in
