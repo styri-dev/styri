@@ -143,6 +143,7 @@ jobs:
           E2E_FIRST_RUN: "1"
         run: npx playwright test --config mixed.config.ts first-run
       - if: failure()
+        continue-on-error: true # a full artifact store must not fail a passing run
         uses: actions/upload-artifact@v7
         with:
           name: mixed-fleet-failure
@@ -166,6 +167,7 @@ jobs:
       - name: Record the acceptance run and check it
         run: ../../e2e/mixed-fleet/conformance.sh
       - if: always()
+        continue-on-error: true # a full artifact store must not fail a passing run
         uses: actions/upload-artifact@v7
         with:
           name: vda-conformance
@@ -272,6 +274,7 @@ jobs:
         if: failure()
         run: docker compose logs --tail 200
       - if: always()
+        continue-on-error: true # a full artifact store must not fail a passing run
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report-${{ strategy.job-index }}
