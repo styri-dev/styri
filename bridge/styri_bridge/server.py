@@ -322,6 +322,8 @@ class BridgeServer:
             return connection.respond(HTTPStatus.NOT_FOUND, "no site map\n")
         headers = Headers([("Content-Type", image[1]), ("Content-Length", str(len(image[0]))),
                            ("Cache-Control", "no-store")])
+        if image[1] == "image/svg+xml":
+            headers["Content-Security-Policy"] = "sandbox"  # a picture: opened on its own, it runs nothing
         return Response(HTTPStatus.OK.value, HTTPStatus.OK.phrase, headers, image[0])
 
     def _process_request(self, connection: ServerConnection, request: Request) -> Response | None:

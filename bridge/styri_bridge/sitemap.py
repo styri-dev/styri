@@ -13,9 +13,15 @@ from __future__ import annotations
 import hashlib
 import heapq
 import json
+import logging
 import math
+import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+from .occupancy import to_svg
+
+logger = logging.getLogger(__name__)
 
 
 ON_EDGE = 0.5  # metres: this close to an edge is on the graph
@@ -169,6 +175,9 @@ class Background:
     path: str
     scale: float
     origin: tuple[float, float]
+    negate: bool = False
+    occupied: float = 0.65
+    free: float = 0.196
 
 
 def load_background(path: str) -> Background:
@@ -177,18 +186,17 @@ def load_background(path: str) -> Background:
     try:
         data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
         image = Path(path).parent / data["image"]
-        return Background(str(image), float(data["resolution"]), (float(data["origin"][0]), float(data["origin"][1])))
+        return Background(str(image), float(data["resolution"]), (float(data["origin"][0]), float(data["origin"][1])),
+                          bool(data.get("negate", 0)), float(data.get("occupied_thresh", 0.65)), float(data.get("free_thresh", 0.196)))
     except OSError as exc:
         raise GraphError(f"can't read {path}: {exc.strerror or exc}") from None
     except (KeyError, IndexError, TypeError, ValueError, yaml.YAMLError):
         raise GraphError(f"{path}: needs image, resolution and origin") from None
 
 
-def pgm_to_png(raw: bytes) -> bytes:
-    """A binary PGM (P5), which browsers can't show, as a greyscale PNG."""
+def read_pgm(raw: bytes) -> tuple[int, int, int, bytes]:
+    """A binary PGM (P5) as (width, height, top value, pixels)."""
     import re
-    import struct
-    import zlib
     match = re.match(rb"P5(?:\s|#[^\n]*\n)+(\d+)(?:\s|#[^\n]*\n)+(\d+)(?:\s|#[^\n]*\n)+(\d+)\s", raw)
     if not match:
         raise GraphError("not a binary PGM image")
@@ -198,6 +206,14 @@ def pgm_to_png(raw: bytes) -> bytes:
     pixels = raw[match.end():match.end() + width * height]
     if len(pixels) < width * height:
         raise GraphError("the PGM image is cut short")
+    return width, height, top, pixels
+
+
+def pgm_to_png(raw: bytes) -> bytes:
+    """A binary PGM, which browsers can't show, as a greyscale PNG."""
+    import struct
+    import zlib
+    width, height, _, pixels = read_pgm(raw)
 
     def chunk(kind: bytes, body: bytes) -> bytes:
         return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
@@ -215,6 +231,7 @@ class Site:
         self.graph: Graph | None = None
         self.background: Background | None = None
         self.problems: list[str] = []
+        self.clean: bytes | None = None  # a scan, drawn clean; made once, off the event loop
         if graph_path and not Path(graph_path).exists():
             self.graph = Graph([], [])  # not drawn yet: the editor makes the file
         elif graph_path:
@@ -227,15 +244,31 @@ class Site:
                 self.background = load_background(map_path)
             except GraphError as exc:
                 self.problems.append(f"Site map not used: {exc}")
+        if self.background and self.background.path.lower().endswith(".pgm"):
+            threading.Thread(target=self.clean_scan, daemon=True).start()
+
+    def clean_scan(self) -> None:
+        """Until this is done, or if it can't be, the scan shows as it is."""
+        b = self.background
+        try:
+            width, height, top, pixels = read_pgm(Path(b.path).read_bytes())
+            self.clean = to_svg(pixels, width, height, top, b.scale, negate=b.negate, occupied=b.occupied, free=b.free)
+        except (OSError, GraphError, ValueError) as exc:
+            logger.warning("Site map shown as it is: %s", exc)
 
     def image(self) -> tuple[bytes, str] | None:
         """(bytes, content type) for the browser, or None."""
         if self.background is None:
             return None
+        if self.clean is not None:
+            return self.clean, "image/svg+xml"
         raw = Path(self.background.path).read_bytes()
         if raw[:2] == b"P5":
             return pgm_to_png(raw), "image/png"
-        return raw, "image/jpeg" if self.background.path.lower().endswith((".jpg", ".jpeg")) else "image/png"
+        name = self.background.path.lower()
+        if name.endswith(".svg"):
+            return raw, "image/svg+xml"
+        return raw, "image/jpeg" if name.endswith((".jpg", ".jpeg")) else "image/png"
 
     @property
     def version(self) -> str | None:

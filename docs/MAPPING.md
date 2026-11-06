@@ -317,7 +317,9 @@ ROS 2 robot to that point; a VDA 5050 robot goes to the nearest node, along the
 shortest route through the graph.
 
 **The background** is a ROS `map.yaml` with its PGM or PNG, or a small YAML with
-`image`, `resolution` (metres per pixel) and `origin`.
+`image` (PNG, JPEG or SVG), `resolution` (metres per pixel) and `origin`. A PGM is
+drawn clean: specks go, small gaps close, and walls run straight. That changes only
+the picture, and your map file stays as it is.
 
 **Lining them up.** `map_offset` places a robot's own coordinates on the site map:
 rotated by `theta`, then moved by `x` and `y`.
