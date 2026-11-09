@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Record what's on the broker during the acceptance run, and check it with
-# vda5050-testkit. Run from examples/mixed-fleet, with the testkit image built:
-#   docker build -t vda5050-testkit "https://github.com/ksshen0000/vda5050-testkit.git#<commit>"
+# vda5050-testkit. Run from examples/mixed-fleet, with the testkit image built as CI
+# builds it (pinned commit, then patch_testkit_schemas.py, then docker build).
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out="$PWD/out/conformance"

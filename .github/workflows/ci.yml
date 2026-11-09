@@ -163,7 +163,11 @@ jobs:
       - name: Build the demo, and vda5050-testkit at a pinned commit
         run: |
           docker compose build
-          docker build -t vda5050-testkit "https://github.com/ksshen0000/vda5050-testkit.git#49b1f1e2cf11ef9bfaac8b1bdb5602546773c355"
+          # The same testkit and 2.0.0 schema corrections as styri-vda-bench.
+          mkdir -p /tmp/testkit
+          curl -fsSL https://github.com/ksshen0000/vda5050-testkit/archive/49b1f1e2cf11ef9bfaac8b1bdb5602546773c355.tar.gz | tar xz -C /tmp/testkit --strip-components=1
+          python3 -I ../../e2e/mixed-fleet/patch_testkit_schemas.py /tmp/testkit
+          docker build -t vda5050-testkit /tmp/testkit
       - name: Record the acceptance run and check it
         run: ../../e2e/mixed-fleet/conformance.sh
       - if: always()
