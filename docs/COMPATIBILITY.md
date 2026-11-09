@@ -9,11 +9,27 @@ Tested against simulators; real-robot results are added as they're run.
 | | Supported |
 |---|---|
 | ROS 2 | Humble and Jazzy robots; Fast DDS and Cyclone DDS |
-| VDA 5050 | 2.0 and 2.1. Not 1.1 |
+| VDA 5050 | 2.0 and 2.1. Not 1.1 or 3.0: see [VDA 5050 versions](#vda-5050-versions) |
 | Nav2 | `NavigateToPose`, on Jazzy; goals are cancelled through its standard action |
 | Architectures | amd64 and arm64 |
 
 Paused shows only for robots that report it.
+
+## VDA 5050 versions
+
+Styri v2.0 supports VDA 5050 **2.0 and 2.1**. It doesn't support **3.0**, released in
+March 2026, or 1.1.
+
+A 3.0 vehicle shows as **UNSUPPORTED** with "Unsupported: VDA 5050 3.0", never OK,
+whether it's online or not. 3.0 renamed fields Styri relies on, so for that vehicle:
+
+- only Operator stop is available. Send, Pause, Resume and Cancel are off. Operator
+  stop sends `startPause` and `cancelOrder`, which 3.0 still has, as a valid 3.0
+  message, but it hasn't been tried against a real 3.0 vehicle, so don't rely on it;
+- it isn't placed on the map, and its battery isn't shown;
+- its own safety stop is still shown when the vehicle reports one.
+
+3.0 support is planned for after v2.0.
 
 ## VDA 5050 field names
 

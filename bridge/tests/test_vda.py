@@ -436,3 +436,71 @@ def test_the_panel_hears_about_the_broker_and_who_else_is_on_it():
     c, _ = client()
     c.on_message("uagv/v2/moro/M8/state", b"{}")
     assert c.status() == {"connected": False, "url": "mqtt://127.0.0.1:1883", "unconfigured": ["moro/M8"]}
+
+
+def v3_state(**over):
+    """A VDA 5050 3.0 state: renamed position, power and safety fields."""
+    s = {**header(), "version": "3.0.0", "orderId": "o1", "orderUpdateId": 0, "lastNodeId": "a",
+         "lastNodeSequenceId": 0, "nodeStates": [], "edgeStates": [], "driving": True, "paused": False,
+         "actionStates": [], "instantActionStates": [], "operatingMode": "AUTOMATIC", "errors": [],
+         "powerSupply": {"stateOfCharge": 80.0, "charging": False},
+         "safetyState": {"activeEmergencyStop": "NONE", "fieldViolation": False},
+         "mobileRobotPosition": {"x": 0.0, "y": 0.0, "theta": 0.0, "mapId": "m", "localized": True}}
+    return {**s, **over}
+
+
+def feed_v3(c, kind, msg):
+    c.on_message(f"uagv/v3/acme/SN1/{kind}", json.dumps(msg).encode())
+
+
+def test_a_vda_5050_3_vehicle_is_unsupported_never_ok():
+    from styri_bridge.model import capabilities, describe, overlay_health
+    c, view = client()
+    feed_v3(c, "connection", {**header(), "version": "3.0.0", "connectionState": "ONLINE"})
+    feed_v3(c, "state", v3_state())
+    assert view.live.unsupported == "VDA 5050 3.0"
+    h = health(view)
+    assert h["level"] == "fault"
+    assert h["line"].startswith("Unsupported: VDA 5050 3.0.") and "COMPATIBILITY.md" in h["line"]
+    snap = view.monitor.evaluate()
+    overlay_health(view, snap)
+    robot = describe(view, snap)
+    assert robot["verdict"] == "FAULT" and robot["unsupported"] == "VDA 5050 3.0"
+    assert view.live.warnings == []  # not "invalid state": unsupported says it
+    assert capabilities(view.map, view.live) == {"can_teleop": False, "can_waypoint": False, "can_pause": False,
+                                                 "can_cancel": False, "can_stop": True}
+    assert any("Unsupported: VDA 5050 3.0" in m for _, m in view.monitor.activity.events)
+    # Offline doesn't hide it either.
+    feed_v3(c, "connection", {**header(1), "version": "3.0.0", "connectionState": "CONNECTION_BROKEN"})
+    assert health(view)["level"] == "fault"
+
+
+def test_a_vda_5050_3_vehicle_gets_operator_stop_only():
+    c, view = client()
+    feed_v3(c, "state", v3_state())
+    with pytest.raises(VdaError, match="Unsupported: VDA 5050 3.0"):
+        asyncio.run(c.goal(view, node_id="c"))
+    with pytest.raises(VdaError, match="Unsupported"):
+        asyncio.run(c.resume(view))
+    assert c.mqtt.sent == []
+
+    async def stop():
+        sent = await c.operator_stop(view)
+        c.vehicles[("acme", "SN1")].stop_until = 0  # no retries in the test
+        return sent
+    msg = asyncio.run(stop())
+    assert [a["actionType"] for a in msg["actions"]] == ["startPause", "cancelOrder"]
+    assert c.mqtt.sent[0][0] == "uagv/v3/acme/SN1/instantActions" and msg["version"] == "3.0.0"
+
+
+def test_a_vda_5050_3_safety_stop_still_shows():
+    c, view = client()
+    feed_v3(c, "state", v3_state(safetyState={"activeEmergencyStop": "MANUAL", "fieldViolation": False}))
+    assert view.live.vehicle_stop is True
+
+
+def test_a_vehicle_back_on_2x_is_supported_again():
+    c, view = client()
+    feed_v3(c, "state", v3_state())
+    feed(c, "state", state())
+    assert view.live.unsupported is None and health(view)["level"] == "ok"

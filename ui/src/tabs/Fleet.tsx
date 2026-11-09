@@ -6,6 +6,9 @@ import { PROTOCOL, type RobotView } from "../view";
 
 const Paused = ({ sm }: { sm?: boolean }) => <span className={`chip-paused ${sm ? "chip-paused--sm" : ""}`}>❚❚ Paused</span>;
 
+/** A verdict word longer than WARNING (UNSUPPORTED) is set smaller, so it still fits its tile. */
+const fit = (size: number, word: string) => (word.length > 7 ? Math.round((size * 7) / word.length) : size);
+
 /** 1–3 robots: tiles fill the screen, one column each. */
 function BigTile({ v, one, ctx, verdictSize }: { v: RobotView; one: boolean; ctx: PanelContext; verdictSize: number }) {
   const r = v.r;
@@ -20,7 +23,7 @@ function BigTile({ v, one, ctx, verdictSize }: { v: RobotView; one: boolean; ctx
       </div>
       <div className="ftile__body">
         <div className="ftile__left">
-          <span className={`ftile__verdict v-${v.key} ${v.dim ? "is-dim" : ""}`} style={{ fontSize: verdictSize }}><span className="mono">{v.glyph}</span>{v.word}</span>
+          <span className={`ftile__verdict v-${v.key} ${v.dim ? "is-dim" : ""}`} style={{ fontSize: fit(verdictSize, v.word) }}><span className="mono">{v.glyph}</span>{v.word}</span>
           {v.hasReason && <span className={`ftile__reason ${v.unconfirmed ? "tone-fault strong" : ""}`}>{v.shownReason}</span>}
           <div className={`ftile__task ${v.dim ? "is-dim" : ""}`}>
             <span className="ftile__t1">{v.t1}</span>
@@ -140,7 +143,7 @@ function Wall({ ctx }: { ctx: PanelContext }) {
             <span className="walltile__id"><span className="mono">{v.r.name}</span>{v.paused && <span className="walltile__paused">❚❚ Paused</span>}</span>
             {v.fresh && <span className="mono walltile__fresh">{v.fresh}</span>}
           </div>
-          <span className={`walltile__verdict v-${v.key} ${v.dim ? "is-dim" : ""}`}><span className="mono">{v.glyph}</span>{v.word}</span>
+          <span className={`walltile__verdict v-${v.key} ${v.dim ? "is-dim" : ""}`} style={v.word.length > 7 ? { fontSize: fit(80, v.word) } : undefined}><span className="mono">{v.glyph}</span>{v.word}</span>
           {v.hasReason && <span className="walltile__reason">{v.shownReason}</span>}
           <div className="spacer" />
           <div className={`walltile__bat ${v.dim ? "is-dim" : ""}`}>

@@ -34,6 +34,7 @@ STOP_RETRY = 1.0       # seconds between Operator stop retries, until the vehicl
 STOP_GIVE_UP = 15.0    # seconds, then the panel says it isn't confirmed
 FACTSHEET_RETRY = 10.0  # seconds
 DEFAULT_VERSION = "2.1.0"
+SUPPORTED_MAJORS = {"2"}  # VDA 5050 2.0 and 2.1. Not 1.1 or 3.0: docs/COMPATIBILITY.md
 NOT_A_FAULT = {"noOrderToCancel"}  # what a vehicle reports when Operator stop finds no order
 
 
@@ -152,7 +153,12 @@ class VdaClient:
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._invalid(vehicle, kind, ["not JSON"])
             return
-        wrong = schema.problems(kind, message)
+        if self._unsupported(vehicle, parts[1], message):
+            # Its fields differ from 2.x; read what still means the same, flag nothing as invalid.
+            vehicle.invalid_seen.clear()
+            wrong = [] if isinstance(message, dict) else ["not a JSON object"]
+        else:
+            wrong = schema.problems(kind, message)
         if wrong:
             self._invalid(vehicle, kind, wrong)
             if not isinstance(message, dict):
@@ -177,6 +183,21 @@ class VdaClient:
                 self._warnings(vehicle)
         except (AttributeError, KeyError, TypeError, ValueError) as exc:  # invalid, and already flagged
             logger.info("Could not read %s from %s: %s", kind, vehicle.view.name, exc)
+
+    def _unsupported(self, v: Vehicle, topic_major: str, message: object) -> bool:
+        """A vehicle on a major version Styri doesn't speak is shown as unsupported, never OK."""
+        version = message.get("version") if isinstance(message, dict) else None
+        if isinstance(version, str) and version.split(".")[0]:
+            major, label = version.split(".")[0], ".".join(version.split(".")[:2])
+        else:
+            major = label = topic_major.removeprefix("v")
+        live = v.view.live
+        was = live.unsupported
+        live.unsupported = None if major in SUPPORTED_MAJORS else f"VDA 5050 {label}"
+        if live.unsupported and live.unsupported != was:
+            logger.warning("%s speaks %s, which Styri doesn't support", v.view.name, live.unsupported)
+            v.view.monitor.activity.add("warning", f"Unsupported: {live.unsupported}. See COMPATIBILITY.md", "vda")
+        return live.unsupported is not None
 
     def _invalid(self, v: Vehicle, kind: str, wrong: list[str]) -> None:
         if kind not in v.invalid_seen:
@@ -239,7 +260,8 @@ class VdaClient:
         faults = {e.get("errorType", "error"): (2 if e.get("errorLevel") == "FATAL" else 1,
                                                 e.get("errorDescription") or e.get("errorLevel", "")) for e in errors}
         safety = msg.get("safetyState", {})
-        live.vehicle_stop = safety.get("eStop", "NONE") != "NONE"  # the schema's own field name
+        # The schema's own field names: eStop in 2.x, activeEmergencyStop in 3.0 (shown even though 3.0 is unsupported).
+        live.vehicle_stop = safety.get("eStop", safety.get("activeEmergencyStop", "NONE")) != "NONE"
         if live.vehicle_stop:
             faults["Vehicle safety stop"] = (2, "active")
         monitor.faults(faults)
@@ -267,6 +289,9 @@ class VdaClient:
             raise VdaError("control is off")
         if self.mqtt is None:
             raise VdaError("not connected to the MQTT broker")
+        if v.view.live.unsupported and (topic != "instantActions" or not {
+                a.get("actionType") for a in body.get("actions", [])} <= {"startPause", "cancelOrder"}):
+            raise VdaError(f"Unsupported: {v.view.live.unsupported}. Only Operator stop is available")
         link = v.view.map.link
         header = v.headers.get(topic, -1) + 1
         message = {"headerId": header, "timestamp": orders.timestamp(), "version": v.version,

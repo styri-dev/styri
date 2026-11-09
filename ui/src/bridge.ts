@@ -113,6 +113,7 @@ export interface RobotModel {
   limits: { max_linear: number; max_angular: number };
   points: string[];
   vehicle_stop: boolean;
+  unsupported?: string | null; // e.g. "VDA 5050 3.0": never OK, Operator stop only
   stop: StopStatus | null; // the last Operator stop
   stop_at: number | null; // unix seconds it stood still
   command: Command | null;

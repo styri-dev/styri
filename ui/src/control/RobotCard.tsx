@@ -27,6 +27,7 @@ function actionsFor(v: RobotView, ctx: PanelContext, where: "map" | "detail") {
   else if (v.key === "stale") { sec = ["details"]; line = `No data for ${seen} s. Stop is still available.`; }
   else if (v.key === "offline") { sec = ["details"]; line = `${v.reason.split(". ")[0]}. Stop is still available.`; }
   else if (v.driven) { sec = ["details"]; line = `Being driven by ${r.driver}`; }
+  else if (r.unsupported) { sec = ["details"]; line = `Unsupported: ${r.unsupported}. Only Operator stop is available.`; }
   else if (v.key === "fault") { main = "details"; if (hasTask && c.can_cancel) sec = ["cancel"]; line = "Next: check the robot and reset it from its own panel"; }
   else if (r.off_graph != null) {
     main = "details";

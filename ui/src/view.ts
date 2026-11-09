@@ -229,12 +229,14 @@ export function robotView(r: RobotModel, env: RobotEnv): RobotView {
   const disc = state.conn !== "open";
   const brokerDown = !!state.broker && !state.broker.connected;
   // Off the graph is a warning however healthy the robot says it is.
-  const key: VerdictKey = r.online === false ? "offline" : r.verdict === "OFFLINE" ? "stale"
+  // A protocol version Styri doesn't speak is a fault, online or not: nothing it reports is trusted.
+  const key: VerdictKey = r.unsupported ? "fault" : r.online === false ? "offline" : r.verdict === "OFFLINE" ? "stale"
     : r.verdict === "FAULT" ? "fault" : r.verdict === "WARNING" || r.off_graph != null ? "warn" : "ok";
   const unconfirmed = stopFailed(r);
   const seenAgo = r.last_seen == null ? null : Math.max(0, now / 1000 - r.last_seen);
 
   let reason = r.verdict === "OK" ? "" : r.reason;
+  if (r.unsupported) reason = r.reason; // the bridge's line, pointing to COMPATIBILITY.md
   if (key === "stale") reason = seenAgo == null ? r.reason : `No data for ${Math.round(seenAgo)} s. Showing last known values.`;
   if (key === "offline") reason = offlineReason(r, brokerDown);
   if (r.off_graph != null && !reason) reason = `Off graph — ${r.off_graph.toFixed(1)} m from the route.`;
@@ -289,9 +291,9 @@ export function robotView(r: RobotModel, env: RobotEnv): RobotView {
   vitals.push(...rest.sort((a, b) => Number(!!b.warn) - Number(!!a.warn)).slice(0, 3 - vitals.length));
 
   const battery = r.battery == null ? "—" : r.battery.toFixed(0);
-  const short = unconfirmed ? SHORT_UNCONFIRMED[r.stop!]! : reason;
+  const short = unconfirmed ? SHORT_UNCONFIRMED[r.stop!]! : r.unsupported ? `Unsupported: ${r.unsupported}` : reason;
   return {
-    r, key, word: VERDICT[key].word, glyph: VERDICT[key].glyph,
+    r, key, word: r.unsupported ? "UNSUPPORTED" : VERDICT[key].word, glyph: VERDICT[key].glyph,
     health: key === "stale" || key === "offline" ? "unknown" : key,
     unconfirmed, reason, shownReason, hasReason, fresh, dim: key === "stale" || key === "offline", paused,
     driven: !!r.driver && r.driver !== env.name,

@@ -63,6 +63,7 @@ class Live:
     online: bool | None = None    # None: this protocol doesn't say
     factsheet: dict | None = None
     vehicle_stop: bool = False    # the vehicle reports its own safety stop is active
+    unsupported: str | None = None  # e.g. "VDA 5050 3.0": a protocol version Styri can't read or command
     # The last Operator stop. Progress lives here, apart from the robot's health.
     stop_sent_at: float | None = None
     stop_replied: bool = False    # the robot has said something since
@@ -103,6 +104,9 @@ def capabilities(robot: RobotMap, live: Live) -> dict:
         return {"can_teleop": moves and bool(link.cmd_vel), "can_waypoint": moves and bool(link.nav2_action),
                 "can_pause": moves and bool(link.pause_topic), "can_cancel": moves and bool(link.nav2_action),
                 "can_stop": bool(link.cmd_vel or link.nav2_action)}
+    if live.unsupported:  # its messages can't be read reliably: Operator stop only
+        return {"can_teleop": False, "can_waypoint": False, "can_pause": False, "can_cancel": False,
+                "can_stop": bool({"startPause", "cancelOrder"} & set(link.instant_actions))}
     allowed = set(link.instant_actions)
     if live.factsheet is not None:
         listed = {a.get("actionType") for a in live.factsheet.get("protocolFeatures", {}).get("agvActions", [])
@@ -118,8 +122,14 @@ def capabilities(robot: RobotMap, live: Live) -> dict:
 def overlay_health(view: RobotView, snap: dict) -> None:
     """A tile can't tell that a robot went offline; the protocol can. In the snapshot, so every
     screen says the same thing. Health only: a stop's progress is `stop_status`."""
-    if view.live.online is False:
+    if view.live.unsupported:  # never OK, online or not: nothing it reports can be trusted
+        snap["health"] = {"level": "fault", "line": unsupported_line(view.live.unsupported)}
+    elif view.live.online is False:
         snap["health"] = {"level": "unknown", "line": "This robot is offline."}
+
+
+def unsupported_line(what: str) -> str:
+    return f"Unsupported: {what}. Styri supports VDA 5050 2.0 and 2.1: see COMPATIBILITY.md."
 
 
 def has_speed_feedback(robot: RobotMap) -> bool:
@@ -267,7 +277,7 @@ def describe(view: RobotView, snap: dict, graph: Graph | None = None, off_limit:
                  "last_node": live.last_node, "route": live.route, "nodes_total": live.route_total},
         "capabilities": capabilities(robot, live),
         "limits": {"max_linear": robot.link.max_linear, "max_angular": robot.link.max_angular}, "points": [p[0] for p in robot.link.points],
-        "vehicle_stop": live.vehicle_stop, "factsheet": live.factsheet, "stop": stop_status(view),
+        "vehicle_stop": live.vehicle_stop, "unsupported": live.unsupported, "factsheet": live.factsheet, "stop": stop_status(view),
         "stop_at": live.stop_at, "command": describe_command(live.command),
     }
 
