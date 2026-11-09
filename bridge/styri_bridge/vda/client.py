@@ -260,7 +260,7 @@ class VdaClient:
         faults = {e.get("errorType", "error"): (2 if e.get("errorLevel") == "FATAL" else 1,
                                                 e.get("errorDescription") or e.get("errorLevel", "")) for e in errors}
         safety = msg.get("safetyState", {})
-        # The schema's own field names: eStop in 2.x, activeEmergencyStop in 3.0 (shown even though 3.0 is unsupported).
+        # The schemas' own field names, 2.x then 3.0: shown even though 3.0 is unsupported.
         live.vehicle_stop = safety.get("eStop", safety.get("activeEmergencyStop", "NONE")) != "NONE"
         if live.vehicle_stop:
             faults["Vehicle safety stop"] = (2, "active")
