@@ -13,7 +13,7 @@ as an overlay ([below](#your-own-message-types)).
 Mount it at `/etc/styri/styri.yaml`:
 
 ```bash
-docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v2.0.0
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v2.0.1
 ```
 
 or put it anywhere and point `STYRI_CONFIG` at it. Without a file, the
@@ -33,7 +33,7 @@ Five presets ship in the image, under `/opt/styri/presets/` (and in
 | `mixed-fleet.yaml` | A ROS 2 robot and a VDA 5050 vehicle on one map: copy it and change the names |
 
 ```bash
-docker run --rm --network host -e STYRI_CONFIG=/opt/styri/presets/turtlebot4.yaml ghcr.io/styri-dev/styri-core:v2.0.0
+docker run --rm --network host -e STYRI_CONFIG=/opt/styri/presets/turtlebot4.yaml ghcr.io/styri-dev/styri-core:v2.0.1
 ```
 
 ## Check a file before you deploy it
@@ -44,7 +44,7 @@ find. It exits 0 when everything passes, 1 when a mapping fails and 2 when the
 file itself can't be used. Like the panel, it only listens.
 
 ```bash
-docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v2.0.0 styri check
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v2.0.1 styri check
 ```
 
 ```
@@ -196,7 +196,7 @@ in `src` too.
 docker run --rm --network host \
   -v "$PWD/styri-msgs:/opt/styri/overlay:ro" \
   -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" \
-  ghcr.io/styri-dev/styri-core:v2.0.0
+  ghcr.io/styri-dev/styri-core:v2.0.1
 ```
 
 **3. Check it.** `styri check` (and the log at start) lists every overlay it
@@ -239,7 +239,7 @@ vda:
   broker:
     bind: 192.168.1.20               # LAN address for the bundled broker
     # url: mqtt://broker.local:1883  # or a site's own broker; then the bundled one doesn't start
-  interface: uagv
+  interface: uagv                    # the topics' first level(s); a cloud broker may need more, e.g. fleet/uagv
 
 robots:
   - name: amr-01
@@ -294,6 +294,14 @@ itself. With `bind`, it also listens on that LAN address, where each vehicle log
 in with its `username` and may use only its own topics. `tls_cert` and `tls_key`
 (mounted files) add TLS. It never bridges to another broker. `url` uses a site's
 broker instead, with `username` and `password_env` if it needs a login.
+
+**Interface name.** `interface` is the start of every VDA 5050 topic, `uagv` by default.
+It may have several levels, such as `fleet/uagv`, which a shared or cloud broker may
+need (VDA 5050 2.x, section 6.3). Styri also listens for `connection` messages under
+any interface name one to three levels deep. A vehicle publishing under another one is
+named in the log, in Activity and by `styri check`, instead of simply never showing up.
+If the broker closes the connection over that wider subscription, Styri drops it and
+listens under `interface` only.
 
 **The node graph** is a JSON file:
 

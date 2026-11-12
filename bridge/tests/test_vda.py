@@ -46,14 +46,14 @@ class Mqtt:
         self.sent.append((topic, json.loads(payload)))
 
 
-def client(control=True, actions=mapping.INSTANT_ACTIONS):
+def client(control=True, actions=mapping.INSTANT_ACTIONS, interface="uagv"):
     robot = mapping.RobotMap("agv", values=(mapping.Value("battery", "Battery", "state", "batteryState.batteryCharge",
                                                           "%", "number", 1.0, mapping.Rule(warn_below=25), 35.0),),
                              diagnostics_topic=None, stale_after=35.0,
                              link=mapping.Link(protocol="vda5050", manufacturer="acme", serial="SN1",
                                                instant_actions=actions))
     view = RobotView(0, "agv", "0", Monitor(Log(), robot))
-    c = VdaClient([view], mapping.Settings(), Log(), Graph.from_dict(GRAPH), control=control)
+    c = VdaClient([view], mapping.Settings(interface=interface), Log(), Graph.from_dict(GRAPH), control=control)
     c.mqtt = Mqtt()
     return c, view
 
@@ -435,7 +435,8 @@ def test_progress_counts_the_nodes_an_order_started_with():
 def test_the_panel_hears_about_the_broker_and_who_else_is_on_it():
     c, _ = client()
     c.on_message("uagv/v2/moro/M8/state", b"{}")
-    assert c.status() == {"connected": False, "url": "mqtt://127.0.0.1:1883", "unconfigured": ["moro/M8"]}
+    assert c.status() == {"connected": False, "url": "mqtt://127.0.0.1:1883", "unconfigured": ["moro/M8"],
+                          "other_interfaces": {}}
 
 
 def v3_state(**over):
@@ -504,3 +505,126 @@ def test_a_vehicle_back_on_2x_is_supported_again():
     feed_v3(c, "state", v3_state())
     feed(c, "state", state())
     assert view.live.unsupported is None and health(view)["level"] == "ok"
+
+
+# ---- interface names (VDA 5050 2.x, section 6.3) ----------------------------
+
+def connection(state="ONLINE", **over):
+    return json.dumps({**header(), "connectionState": state, **over}).encode()
+
+
+@pytest.mark.parametrize("interface", ["uagv", "fleet/uagv", "site-a/fleet/uagv"])
+def test_any_interface_name_reaches_the_model(interface):
+    c, view = client(interface=interface)
+    c.on_message(f"{interface}/v2/acme/SN1/connection", connection())
+    c.on_message(f"{interface}/v2/acme/SN1/state", json.dumps({**state(), "driving": True}).encode())
+    assert view.live.online and view.live.driving
+    assert c.other_interfaces == {}
+    sent_order = asyncio.run(c.goal(view, node_id="b"))
+    assert c.mqtt.sent[-1][0] == f"{interface}/v2/acme/SN1/order" and sent_order["nodes"]
+
+
+@pytest.mark.parametrize("interface,own", [("uagv", "+/+/+/+/connection"),
+                                           ("fleet/uagv", "+/+/+/+/+/connection"),
+                                           ("a/b/c/d", "+/+/+/+/+/+/+/connection")])
+def test_subscriptions_cover_the_interface_and_watch_connection_under_others(interface, own):
+    c, _ = client(interface=interface)
+    subs = c.subscriptions()
+    assert subs[:3] == [f"{interface}/+/+/+/{t}" for t in ("state", "visualization", "factsheet")]
+    assert own in subs
+    assert {"+/+/+/+/connection", "+/+/+/+/+/connection", "+/+/+/+/+/+/connection"} <= set(subs)
+    assert len(subs) == len(set(subs))  # each topic once, so no message arrives twice
+    c.watch_others = False
+    assert c.subscriptions()[3:] == [f"{interface}/+/+/+/connection"]
+
+
+@pytest.mark.parametrize("interface,topic,other", [
+    ("uagv", "fleet/uagv/v2/acme/SN1/connection", "fleet/uagv"),
+    ("fleet/uagv", "uagv/v2/acme/SN1/connection", "uagv"),
+    ("uagv", "uagv/site/v2/acme/SN1/connection", "uagv/site"),  # starts like ours, one level more
+])
+def test_vehicles_under_another_interface_are_reported_not_silent(interface, topic, other, caplog):
+    c, view = client(interface=interface)
+    c.on_message(topic, connection())
+    assert not view.live.online  # not ours: ignored
+    assert c.other_interfaces == {other: {"acme/SN1"}}
+    assert c.status()["other_interfaces"] == {other: ["acme/SN1"]}
+    warnings = [m for kind, m in c.activity.events if kind == "warning"]
+    assert len(warnings) == 1 and f"'{other}'" in warnings[0] and f"vda.interface is '{interface}'" in warnings[0]
+    assert "acme/SN1" in caplog.text
+
+    # Once per interface name, however many vehicles and messages
+    c.on_message(topic, connection("OFFLINE"))
+    c.on_message(topic.replace("SN1", "SN2"), connection())
+    assert c.other_interfaces == {other: {"acme/SN1", "acme/SN2"}}
+    assert len([k for k, _ in c.activity.events if k == "warning"]) == 1
+
+
+@pytest.mark.parametrize("topic,payload", [
+    ("fleet/uagv/v2/acme/SN1/state", connection()),  # only connection is watched elsewhere
+    ("fleet/uagv/x2/acme/SN1/connection", connection()),  # no major version level
+    ("fleet/uagv/v2/acme/SN1/connection", b""),  # a cleared retained message
+    ("fleet/uagv/v2/acme/SN1/connection", b"not json"),
+    ("fleet/uagv/v2/acme/SN1/connection", b'{"something": "else"}'),
+])
+def test_only_vda_5050_connection_messages_count_as_another_interface(topic, payload):
+    c, _ = client()
+    c.on_message(topic, payload)
+    assert c.other_interfaces == {}
+
+
+def test_a_broker_that_drops_the_wide_subscription_gets_the_narrow_one(monkeypatch):
+    import aiomqtt
+    from styri_bridge.vda import client as module
+
+    connections = []
+
+    class Messages:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if len(connections) == 1:
+                raise aiomqtt.MqttError("Disconnected during message iteration")
+            raise asyncio.CancelledError
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.subs = []
+            self.messages = Messages()
+            connections.append(self.subs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def subscribe(self, topic):
+            self.subs.append(topic)
+
+    monkeypatch.setattr(module.aiomqtt, "Client", FakeClient)
+    monkeypatch.setattr(module, "RECONNECT_AFTER", 0)
+    c, _ = client(interface="fleet/uagv")
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(c.run())
+    assert "+/+/+/+/connection" in connections[0]
+    assert connections[1] == [f"fleet/uagv/+/+/+/{t}" for t in ("state", "visualization", "factsheet", "connection")]
+    assert not c.watch_others
+
+
+def test_check_warns_about_vehicles_under_another_interface(monkeypatch):
+    from styri_bridge import check
+
+    def listen(client, seconds):
+        client.seen_broker = True
+        client.on_message("fleet/uagv/v2/acme/SN1/connection", connection())
+
+    monkeypatch.setattr(check, "_listen", listen)
+    robot = mapping.RobotMap("agv", values=(), diagnostics_topic=None, stale_after=35.0,
+                             link=mapping.Link(protocol="vda5050", manufacturer="acme", serial="SN1"))
+    lines = []
+    failed, _, _ = check.check_vda([robot], mapping.Settings(), None, 0, lines.append)
+    text = "\n".join(lines)
+    assert "WARN  Interface name" in text
+    assert "acme/SN1 publish under 'fleet/uagv', but vda.interface is 'uagv'" in text

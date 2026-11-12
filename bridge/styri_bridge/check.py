@@ -146,6 +146,12 @@ def check_vda(robots: list[mapping.RobotMap], settings: mapping.Settings, graph,
             maps.add(v.view.live.pose["map_id"])
     for manufacturer, serial in sorted(client.unconfigured):
         out(f"Seen on broker, not configured: {manufacturer}/{serial}")
+    other = [(None, "Interface name", f"{', '.join(sorted(who))} publish under '{interface}', but vda.interface is "
+              f"'{settings.interface}', so Styri ignores them. Set vda.interface to match.")
+             for interface, who in sorted(client.other_interfaces.items())]
+    if other:
+        out("")
+        show(other, out)
     return failed, total, maps
 
 

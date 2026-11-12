@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import os
+import re
 import ssl
 import time
 from dataclasses import dataclass, field
@@ -36,6 +37,9 @@ FACTSHEET_RETRY = 10.0  # seconds
 DEFAULT_VERSION = "2.1.0"
 SUPPORTED_MAJORS = {"2"}  # VDA 5050 2.0 and 2.1. Not 1.1 or 3.0: docs/COMPATIBILITY.md
 NOT_A_FAULT = {"noOrderToCancel"}  # what a vehicle reports when Operator stop finds no order
+OTHER_DEPTHS = (1, 2, 3)  # interface names this many levels deep are watched for vehicles on another one
+SETTLE = 10.0  # seconds: a broker that drops Styri sooner after the wide subscription gets the narrow one
+MAJOR = re.compile(r"v\d+")
 
 
 class VdaError(RuntimeError):
@@ -67,6 +71,8 @@ class VdaClient:
         self.env = os.environ if env is None else env
         self.vehicles = {v.key: v for v in (Vehicle(view) for view in views if view.map.link.protocol == "vda5050")}
         self.unconfigured: dict[tuple[str, str], float] = {}  # seen on the broker, not in styri.yaml
+        self.other_interfaces: dict[str, set[str]] = {}  # interface name -> vehicles publishing under it
+        self.watch_others = True  # off once a broker refuses the wide connection subscription
         self.mqtt: aiomqtt.Client | None = None
         self.connected = False
         self.seen_broker = False
@@ -79,7 +85,21 @@ class VdaClient:
         """For the panel: is the broker there, and who's on it that styri.yaml doesn't list?"""
         b = self.settings.broker
         return {"connected": self.connected, "url": b.url or f"mqtt://{b.bind or '127.0.0.1'}:{b.port}",
-                "unconfigured": sorted(f"{m}/{s}" for m, s in self.unconfigured)}
+                "unconfigured": sorted(f"{m}/{s}" for m, s in self.unconfigured),
+                "other_interfaces": {i: sorted(w) for i, w in sorted(self.other_interfaces.items())}}
+
+    def subscriptions(self) -> list[str]:
+        """Everything under the interface name, which may have several levels (VDA 5050 2.x 6.3).
+
+        `connection` is also watched under any interface name 1 to 3 levels deep, so that
+        vehicles on another one are reported instead of silently missing. It's retained and rare.
+        """
+        own = self.settings.interface
+        topics = [f"{own}/+/+/+/{t}" for t in SUBSCRIBE if t != "connection"]
+        if not self.watch_others:
+            return topics + [f"{own}/+/+/+/connection"]
+        depths = sorted(set(OTHER_DEPTHS) | {len(own.split("/"))})
+        return topics + ["/".join(["+"] * (d + 3) + ["connection"]) for d in depths]
 
     # ---- connection -----------------------------------------------------
 
@@ -100,18 +120,27 @@ class VdaClient:
         """Stay connected. A broker that goes away, or never comes, is reported once, and retried."""
         failures = 0
         while True:
+            subscribed_at = None
             try:
                 async with aiomqtt.Client(identifier=f"styri-{os.getpid()}", **self._client_args()) as client:
                     self.mqtt, self.connected, failures = client, True, 0
                     self.seen_broker = True
                     self.activity.add("connection", "Connected to the MQTT broker", "vda")
-                    await client.subscribe(f"{self.settings.interface}/+/+/+/+")
+                    for topic in self.subscriptions():
+                        await client.subscribe(topic)
+                    subscribed_at = time.monotonic()
                     async for message in client.messages:
                         self.on_message(str(message.topic), message.payload)
                         await self._request_factsheets()
             except aiomqtt.MqttError as exc:
                 self.mqtt = None
                 failures += 1
+                if self.watch_others and subscribed_at is not None and time.monotonic() - subscribed_at < SETTLE:
+                    # Some brokers close the connection over a subscription their policy doesn't allow.
+                    self.watch_others = False
+                    logger.warning("The MQTT broker closed the connection right after Styri subscribed to "
+                                   "connection messages under any interface name. Listening under '%s' only; "
+                                   "vehicles on another interface name won't be reported.", self.settings.interface)
                 if self.connected:
                     logger.warning("MQTT broker: %s", exc)
                     self.activity.add("warning", "Lost the MQTT broker: VDA 5050 robots are stale until it's back", "vda")
@@ -140,10 +169,15 @@ class VdaClient:
     # ---- incoming ---------------------------------------------------------
 
     def on_message(self, topic: str, payload: bytes) -> None:
-        parts = topic.split("/")
-        if len(parts) != 5 or parts[0] != self.settings.interface or parts[4] not in SUBSCRIBE:
+        # interface name (one or more levels) / major version / manufacturer / serial number / topic
+        prefix = self.settings.interface + "/"
+        parts = topic[len(prefix):].split("/") if topic.startswith(prefix) else []
+        if len(parts) != 4:
+            self._other_interface(topic, payload)
             return
-        key, kind = (parts[2], parts[3]), parts[4]
+        if parts[3] not in SUBSCRIBE:
+            return
+        major, key, kind = parts[0], (parts[1], parts[2]), parts[3]
         vehicle = self.vehicles.get(key)
         if vehicle is None:
             self.unconfigured[key] = time.monotonic()
@@ -153,7 +187,7 @@ class VdaClient:
         except (json.JSONDecodeError, UnicodeDecodeError):
             self._invalid(vehicle, kind, ["not JSON"])
             return
-        if self._unsupported(vehicle, parts[1], message):
+        if self._unsupported(vehicle, major, message):
             # Its fields differ from 2.x; read what still means the same, flag nothing as invalid.
             vehicle.invalid_seen.clear()
             wrong = [] if isinstance(message, dict) else ["not a JSON object"]
@@ -183,6 +217,28 @@ class VdaClient:
                 self._warnings(vehicle)
         except (AttributeError, KeyError, TypeError, ValueError) as exc:  # invalid, and already flagged
             logger.info("Could not read %s from %s: %s", kind, vehicle.view.name, exc)
+
+    def _other_interface(self, topic: str, payload: bytes) -> None:
+        """A VDA 5050 vehicle's connection message under another interface name: say so, once per name."""
+        levels = topic.split("/")
+        if len(levels) < 5 or levels[-1] != "connection" or not MAJOR.fullmatch(levels[-4]):
+            return
+        try:
+            message = json.loads(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return
+        if not isinstance(message, dict) or "connectionState" not in message:
+            return
+        interface, who = "/".join(levels[:-4]), f"{levels[-3]}/{levels[-2]}"
+        seen = self.other_interfaces.setdefault(interface, set())
+        if who in seen:
+            return
+        seen.add(who)
+        if len(seen) == 1:
+            text = (f"VDA 5050 vehicles publish under the interface name '{interface}', but vda.interface is "
+                    f"'{self.settings.interface}', so Styri ignores them. Set vda.interface to match.")
+            logger.warning("%s First seen: %s", text, who)
+            self.activity.add("warning", text, "vda")
 
     def _unsupported(self, v: Vehicle, topic_major: str, message: object) -> bool:
         """A vehicle on a major version Styri doesn't speak is shown as unsupported, never OK."""

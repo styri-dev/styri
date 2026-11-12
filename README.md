@@ -14,7 +14,7 @@ Styri — one offline operator panel for ROS 2 and VDA 5050 robots. See, send an
 Run it on any Linux box on the robots' network (amd64 or arm64):
 
 ```bash
-docker run --rm --network host ghcr.io/styri-dev/styri-core:v2.0.0
+docker run --rm --network host ghcr.io/styri-dev/styri-core:v2.0.1
 ```
 
 Open **http://&lt;this machine's IP&gt;:8080**. Host networking lets Styri see DDS discovery on your LAN. Open source: [read the code](.) before you run it.
@@ -99,7 +99,7 @@ One container: a small bridge subscribes to your ROS 2 topics and serves a stati
 ## Configuration
 
 Pass settings as environment variables, for example
-`docker run -e ROS_DOMAIN_ID=7 -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v2.0.0`.
+`docker run -e ROS_DOMAIN_ID=7 -e STYRI_MIN_VOLTAGE=23.0 --rm --network host ghcr.io/styri-dev/styri-core:v2.0.1`.
 
 | Variable | Default | |
 |---|---|---|
@@ -123,7 +123,7 @@ fields:
 ```
 
 ```bash
-docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v2.0.0 styri check
+docker run --rm --network host -v "$PWD/styri.yaml:/etc/styri/styri.yaml:ro" ghcr.io/styri-dev/styri-core:v2.0.1 styri check
 ```
 
 `styri check` tests the file against the live robot and names anything it can't
