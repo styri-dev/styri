@@ -46,16 +46,18 @@ after you buy, raises that.
 
 ### Without registry access
 
-Ask us for the release as an image tarball: there's one per architecture,
-with SHA-256 sums. Copy the tarball for the site's machine
-(`uname -m`: `x86_64` is amd64, `aarch64` is arm64), then:
+Download the release from
+[styri-dev/styri-pro-releases](https://github.com/styri-dev/styri-pro-releases/releases):
+an image tarball per architecture, with `SHA256SUMS.txt`. Copy the tarball for
+the site's machine (`uname -m`: `x86_64` is amd64, `aarch64` is arm64), then:
 
 ```bash
 sha256sum -c --ignore-missing SHA256SUMS.txt
 docker load < styri-pro-v2.0.1-linux-amd64.tar.gz
 ```
 
-and run it as above.
+and run it as above. Air-gapped Kubernetes: the same releases have signed Zarf
+packages; that repository's README shows the install.
 
 ## The license
 
@@ -66,9 +68,9 @@ and run it as above.
   covers, the panel shows the first ones and says so.
 - **Expiry:** an expired license keeps the fleet working for 14 more days,
   with a notice on every screen, so nothing stops in the middle of a shift.
-  After that the panel shows one robot, like Styri Core, until the license
+  After that the panel shows three robots, like Styri Core, until the license
   is renewed.
-- **No license, or one that isn't valid:** one robot, like Styri Core, and a
-  notice saying why when your file lists more than one.
+- **No license, or one that isn't valid:** three robots, like Styri Core, and a
+  notice saying why when your file lists more than three.
 
 Questions, renewals, more robots: [hello@styri.dev](mailto:hello@styri.dev).
