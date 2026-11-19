@@ -6,6 +6,7 @@
 //   SERIAL      SN-0007                  VDA_VERSION   2.1.0 or 2.0.0
 //   MQTT_USER / MQTT_PASSWORD            INTERFACE     uagv
 //   START_NODE / START_X / START_Y       MAP_ID        plant-a
+//   MQTT_HEARTBEAT  keep-alive in seconds, default 60
 const { AgvController, VirtualAgvAdapter } = require("vda-5050-lib");
 
 const env = (name, fallback) => process.env[name] || fallback;
@@ -36,6 +37,22 @@ AgvController.prototype._acceptOrder = function (order, mode) {
   }
 };
 
+// vda-5050-lib announces ONLINE only once, at start. After a reconnect the broker's
+// retained connection message would stay the last will, CONNECTIONBROKEN, and the vehicle
+// would look offline for good. The library registers its own reconnect callback, which
+// only republishes the state, as it starts; this one replaces it and does both.
+const subscribeOnStarted = AgvController.prototype._subscribeOnStarted;
+AgvController.prototype._subscribeOnStarted = async function () {
+  await subscribeOnStarted.call(this);
+  this.registerConnectionStateChange((now, before) => {
+    if (now !== "online" || before === "online") return;
+    console.log(`${manufacturer}/${serialNumber} reconnected: ONLINE again`);
+    this.publish("connection", { connectionState: "ONLINE" }, { retainMessage: true })
+      .catch((error) => console.error("couldn't announce ONLINE:", error.message));
+    this._publishCurrentState();
+  });
+};
+
 async function main() {
   const controller = new AgvController(
     { manufacturer, serialNumber },
@@ -46,6 +63,9 @@ async function main() {
         brokerUrl: env("BROKER_URL", "mqtt://localhost:1883"),
         username: process.env.MQTT_USER,
         password: process.env.MQTT_PASSWORD,
+        // The library's default is 15 s: the broker drops a client it hasn't heard from in
+        // 1.5 times that, so a pause of a few seconds in a Docker VM dropped every vehicle.
+        heartbeat: Number(env("MQTT_HEARTBEAT", 60)),
       },
     },
     { agvAdapterType: VirtualAgvAdapter },
