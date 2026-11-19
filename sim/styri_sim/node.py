@@ -21,6 +21,7 @@ from sensor_msgs.msg import BatteryState, LaserScan
 from std_msgs.msg import Bool, String
 
 from .model import Limits, SimRobot
+from .route import Floor, length
 
 try:  # Nav2's own messages, when installed (the sim image has them)
     from nav2_msgs.action import NavigateToPose
@@ -39,7 +40,9 @@ PHYSICS_HZ = 50
 # for NAV_RUN s, then succeeds (every third one fails), then NAV_GAP s idle.
 NAV_RUN, NAV_GAP = 8.0, 4.0
 # SIM_NAV_SERVER=1: a real NavigateToPose server instead of that cycle. Goals
-# drive the robot straight there at NAV_SPEED, and /amcl_pose reports where it is.
+# drive the robot there at NAV_SPEED, and /amcl_pose reports where it is.
+# SIM_FLOOR=<obstacles.json>: it plans around the floor's racks and walls, and turns
+# down a goal on one; without it, it drives straight there.
 NAV_SPEED = 0.5  # m/s
 
 
@@ -75,7 +78,7 @@ class SimNode(Node):
             self._nav_paused = False
             self.create_subscription(Bool, "pause", lambda msg: setattr(self, "_nav_paused", msg.data), reliable)
             self._nav_server = ActionServer(self, NavigateToPose, "navigate_to_pose", self._drive_to,
-                                            goal_callback=lambda _g: GoalResponse.ACCEPT,
+                                            goal_callback=self._take_goal,
                                             cancel_callback=lambda _g: CancelResponse.ACCEPT,
                                             callback_group=ReentrantCallbackGroup())
             self.create_timer(0.2, self._publish_amcl)
@@ -190,29 +193,61 @@ class SimNode(Node):
             msg.feedback.distance_remaining = float(max(0.0, 4.0 * (1 - (now - self._goal_started) / NAV_RUN)))
             self._feedback_pub.publish(msg)
 
+    def _floor(self) -> Floor | None:
+        path = os.environ.get("SIM_FLOOR")
+        if not path:
+            return None
+        try:
+            return Floor.load(path)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            logger.warning("SIM_FLOOR %s unreadable, driving straight: %s", path, exc)
+            return None
+
+    def _path(self, goal) -> list[tuple[float, float]] | None:
+        target = goal.pose.pose.position
+        floor = self._floor()
+        if floor is None:
+            return [(target.x, target.y)]
+        return floor.plan((self.robot.x, self.robot.y), (target.x, target.y))
+
+    def _take_goal(self, goal) -> GoalResponse:
+        """Like Nav2's planner: a goal on a rack, a wall or outside the floor is turned down."""
+        if self._path(goal) is None:
+            p = goal.pose.pose.position
+            logger.info("goal %.1f, %.1f turned down: no path on open floor", p.x, p.y)
+            return GoalResponse.REJECT
+        return GoalResponse.ACCEPT
+
     def _drive_to(self, handle):
-        """Straight to the goal, stopping for a cancel. Runs in its own thread."""
-        target = handle.request.pose.pose.position
+        """Along the planned path, stopping for a cancel. Runs in its own thread."""
         result = NavigateToPose.Result()
-        while True:
+        path = self._path(handle.request)
+        if path is None:  # the robot moved since the goal came in, and there's no way now
+            handle.abort()
+            return result
+        while path:
             if handle.is_cancel_requested:
                 handle.canceled()
                 return result
             if self._nav_paused:
                 time.sleep(0.1)
                 continue
-            dx, dy = target.x - self.robot.x, target.y - self.robot.y
+            (x, y), here = path[0], (self.robot.x, self.robot.y)
+            dx, dy = x - here[0], y - here[1]
             distance = math.hypot(dx, dy)
             if distance < 0.05:
-                handle.succeed()
-                return result
+                path.pop(0)
+                continue
             step = min(distance, NAV_SPEED * 0.1)
             self.robot.x += step * dx / distance
             self.robot.y += step * dy / distance
+            self.robot.theta = math.atan2(dy, dx)
             feedback = NavigateToPose.Feedback()
-            feedback.distance_remaining = float(distance)
+            feedback.distance_remaining = float(length((self.robot.x, self.robot.y), path))
             handle.publish_feedback(feedback)
             time.sleep(0.1)
+        handle.succeed()
+        return result
 
     def _publish_amcl(self) -> None:
         msg = PoseWithCovarianceStamped()

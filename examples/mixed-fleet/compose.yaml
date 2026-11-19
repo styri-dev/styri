@@ -53,6 +53,11 @@ services:
       ROS_DOMAIN_ID: "42"
       SIM_NAMESPACE: /amr01
       SIM_NAV_SERVER: "1"
+      SIM_FLOOR: /site/obstacles.json   # it drives around the racks, as Nav2 would
+    volumes:
+      - site:/site:ro
+    depends_on:
+      site-seed: {condition: service_completed_successfully}
     networks: [fleet]
 
   agv-07:

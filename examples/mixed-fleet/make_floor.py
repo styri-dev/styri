@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Draw the demo's floor: site/floor.svg, clean vector art around the demo's route graph.
 
+It also writes site/obstacles.json: the racks, walls, pillars and pallets as rectangles, for the
+simulated ROS 2 robot to plan around (sim/styri_sim/route.py), so it keeps to the open floor.
+
 It's made up, like the robots. Seeded, so running this again gives the same file. The colours
 are the light theme's; the panel turns a floor dark the same way for every map.
 """
 
+import json
 import random
 from pathlib import Path
 
@@ -13,6 +17,11 @@ X0, Y0, X1, Y1 = -3.0, -3.0, 17.0, 9.0  # metres
 FLOOR, RACK, WALL, TEXT = "#ffffff", "#dfe2e6", "#868c94", "#6d737b"
 rng = random.Random(5050)
 out: list[str] = []
+obstacles: list[tuple[float, float, float, float]] = []
+
+
+def blocked(x0, y0, x1, y1):
+    obstacles.append((round(x0, 3), round(y0, 3), round(x1, 3), round(y1, 3)))
 
 
 def px(x):
@@ -29,6 +38,8 @@ def rect(x0, y0, x1, y1, fill, extra=""):
 
 def wall(*points):
     p = " ".join(f"{px(x)},{py(y)}" for x, y in points)
+    for (ax, ay), (bx, by) in zip(points, points[1:]):
+        blocked(min(ax, bx) - 0.06, min(ay, by) - 0.06, max(ax, bx) + 0.06, max(ay, by) + 0.06)
     out.append(f'<polyline points="{p}" fill="none" stroke="{WALL}" stroke-width="12" stroke-linecap="square" stroke-linejoin="miter"/>')
 
 
@@ -37,6 +48,8 @@ def rack(x0, x1, y, double):
     bay, depth = 0.5, 0.48
     backs = (y - depth, y + 0.02) if double else (y - depth / 2,)
     bays = round((x1 - x0) / bay)
+    reach = depth + 0.07 if double else depth / 2 + 0.07
+    blocked(x0 - 0.04, y - reach, x0 + bays * bay + 0.04, y + reach)  # the whole row, empty slots too
     for k in range(bays):
         for b in backs:
             if rng.random() < 0.82:
@@ -51,6 +64,7 @@ def rack(x0, x1, y, double):
 
 
 def pallets(x0, y0, columns, rows):
+    blocked(x0, y0, x0 + (columns - 1) * 0.62 + 0.5, y0 + (rows - 1) * 0.62 + 0.5)  # the whole stack area
     for i in range(columns):
         for j in range(rows):
             if rng.random() < 0.7:
@@ -74,8 +88,10 @@ for x in (4.0, 10.0):  # dock levellers
     rect(x + 0.45, -2.3, x + 1.15, -2.18, WALL)
 for y in (0.6, 1.5):  # chargers
     rect(-2.3, y, -2.14, y + 0.5, WALL)
+    blocked(-2.3, y, -2.14, y + 0.5)
 for x, y in ((1.0, -1.0), (7.0, -1.0), (15.0, 2.0)):  # pillars, clear of the lanes
     rect(x - 0.12, y - 0.12, x + 0.12, y + 0.12, WALL)
+    blocked(x - 0.12, y - 0.12, x + 0.12, y + 0.12)
 
 # Racks, clear of the lanes (y 2 and 6, x 2, 8 and 12).
 for x0, x1 in ((3.0, 7.0), (9.0, 11.0), (13.5, 15.5)):
@@ -98,3 +114,6 @@ svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBo
 site = Path(__file__).parent / "site"
 (site / "floor.svg").write_text(svg, encoding="utf-8")
 (site / "floor.yaml").write_text(f"image: floor.svg\nresolution: {RES}\norigin: [{X0}, {Y0}, 0.0]\n")
+(site / "obstacles.json").write_text(json.dumps(
+    {"about": "What the simulated robot drives around, in metres: [x0, y0, x1, y1]. Made by make_floor.py.",
+     "bounds": [-2.4, -2.4, 16.4, 8.4], "obstacles": obstacles}, indent=1) + "\n", encoding="utf-8")

@@ -18,7 +18,7 @@ PASSWORD = os.environ.get("STYRI_ADMIN_PASSWORD", "styri-demo")
 NO_INTERNET = os.environ.get("EXPECT_NO_INTERNET") == "1"
 # Where each robot may be sent. Each goes to the first that's away from where it is, so
 # this passes wherever an earlier suite left it.
-GOALS = json.loads(os.environ.get("GOALS") or """{"amr-01": [{"x": 6, "y": 4}, {"x": 1, "y": 1}],
+GOALS = json.loads(os.environ.get("GOALS") or """{"amr-01": [{"x": 8, "y": 4}, {"x": 1, "y": 1}],
     "agv-07": [{"node": "n3"}, {"node": "n1"}], "agv-08": [{"node": "n6"}, {"node": "n1"}]}""")
 fleet: dict = {}
 
