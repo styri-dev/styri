@@ -35,6 +35,7 @@ from .teleop import Teleop
 logger = logging.getLogger("styri_bridge")
 
 PAUSED = "This robot is paused. Press Resume first."
+ALREADY = {"PAUSE": "Already paused. Nothing sent.", "RESUME": "Not paused. Nothing sent."}
 GRAPH_CHANGED = "The graph changed since you opened it. Reload."
 STALE = "This robot's data is stale: teleop and waypoints are off. Operator stop stays available."
 OTHER_DRIVER = "Being driven by another session"
@@ -401,6 +402,9 @@ class Control:
             if action == "TELEOP_RELEASE":
                 self.teleop.release(view.index, "released", session)
                 return None
+            if action in ALREADY and view.live.paused == (action == "PAUSE"):
+                # Two operators, or a panel a moment behind: the robot is already there. A note, not a warning.
+                return {"type": "ack", "action": action, "robot": robot, "id": data.get("id"), "note": ALREADY[action]}
             before = view.live.task_id
             view.live.goal_rejected = False
             sent = await self._send(view, action, data)

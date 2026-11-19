@@ -88,6 +88,33 @@ def test_no_order_to_cancel_is_not_a_fault():
     assert view.monitor.evaluate()["health"]["level"] == "ok"
 
 
+def refused(kind, action_id="p2"):
+    return {"errorType": "instantActionError", "errorLevel": "WARNING",
+            "errorDescription": "instant action is not executable: already paused",
+            "errorReferences": [{"referenceKey": "topic", "referenceValue": "instantActions"},
+                                {"referenceKey": "actionId", "referenceValue": action_id},
+                                {"referenceKey": "actionType", "referenceValue": kind}]}
+
+
+def test_a_refused_second_pause_is_a_note_not_a_warning():
+    c, view = client()
+    for _ in range(3):  # a vehicle repeats the error in a few states
+        feed(c, "state", state(paused=True, errors=[refused("startPause")]))
+    assert health(view)["level"] == "ok" and view.live.errors == []
+    assert view.monitor.activity.events.count(("state", "Already paused: a second Pause changed nothing")) == 1
+    feed(c, "state", state(paused=False, errors=[refused("stopPause", "r2")]))
+    assert health(view)["level"] == "ok"
+    assert ("state", "Not paused: a second Resume changed nothing") in view.monitor.activity.events
+
+
+def test_a_refused_pause_on_a_moving_vehicle_is_still_a_warning():
+    c, view = client()
+    feed(c, "state", state(paused=False, errors=[refused("startPause")]))
+    assert health(view)["level"] == "warn"
+    feed(c, "state", state(paused=True, errors=[{**refused("startPause"), "errorLevel": "FATAL"}]))
+    assert health(view)["level"] == "fault"
+
+
 def test_the_first_message_sets_the_version_we_speak():
     c, view = client()
     feed(c, "connection", {**header(), "connectionState": "ONLINE"})

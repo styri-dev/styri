@@ -267,7 +267,8 @@ export interface BridgeState {
   fleet: RobotModel[];
   control?: ControlStatus;
   authError?: string;
-  notice?: { text: string; action?: string; robot?: string | null; at: number }; // the bridge refused a command
+  // The bridge refused a command, or (quiet) took it with a note, like "Already paused".
+  notice?: { text: string; action?: string; robot?: string | null; at: number; quiet?: boolean };
   audit: AuditRow[];
   users: Account[];
   site?: string | null; // the site's name, from styri.yaml
@@ -363,7 +364,8 @@ export function useBridge(url: string) {
             if (msg.action !== "AUDIT") setState((s) => ({ ...s, notice: { text: msg.error, action: msg.action, robot: msg.robot, at: Date.now() } }));
             break;
           case "ack":
-            setState((s) => ({ ...s, notice: undefined, lastAck: { action: msg.action, at: Date.now() } }));
+            setState((s) => ({ ...s, lastAck: { action: msg.action, at: Date.now() },
+              notice: msg.note ? { text: msg.note, action: msg.action, robot: msg.robot, at: Date.now(), quiet: true } : undefined }));
             break;
           case "audit":
             setState((s) => ({ ...s, audit: msg.rows }));

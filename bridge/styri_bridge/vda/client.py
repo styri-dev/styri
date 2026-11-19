@@ -37,6 +37,17 @@ FACTSHEET_RETRY = 10.0  # seconds
 DEFAULT_VERSION = "2.1.0"
 SUPPORTED_MAJORS = {"2"}  # VDA 5050 2.0 and 2.1. Not 1.1 or 3.0: docs/COMPATIBILITY.md
 NOT_A_FAULT = {"noOrderToCancel"}  # what a vehicle reports when Operator stop finds no order
+
+
+def already(error: dict, paused: bool) -> str | None:
+    """A refused startPause from a vehicle that's paused, or stopPause from one that isn't: it's already
+    where the command wanted it, as when two operators press Pause together. Not a warning, then."""
+    refs = {r.get("referenceKey"): r.get("referenceValue") for r in error.get("errorReferences") or ()
+            if isinstance(r, dict)}
+    kind = refs.get("actionType")
+    if error.get("errorLevel") != "WARNING" or kind not in ("startPause", "stopPause") or (kind == "startPause") != paused:
+        return None
+    return refs.get("actionId") or kind
 OTHER_DEPTHS = (1, 2, 3)  # interface names this many levels deep are watched for vehicles on another one
 SETTLE = 10.0  # seconds: a broker that drops Styri sooner after the wide subscription gets the narrow one
 MAJOR = re.compile(r"v\d+")
@@ -56,6 +67,7 @@ class Vehicle:
     cancelled: str | None = None  # the order Styri cancelled: a cleared order then means idle, not done
     stop_until: float = 0.0
     state: dict | None = None
+    already_noted: set = field(default_factory=set)  # actions refused as already done, logged once each
     next_factsheet_request: float = 0.0
 
     @property
@@ -310,7 +322,17 @@ class VdaClient:
         live.mode = msg.get("operatingMode")
         loads = [x["loadWeight"] for x in msg.get("loads", ()) if isinstance(x.get("loadWeight"), (int, float))]
         live.load = sum(loads) if loads else None
-        errors = [e for e in msg.get("errors", ()) if e.get("errorType") not in NOT_A_FAULT]
+        errors = []
+        for e in msg.get("errors", ()):
+            if e.get("errorType") in NOT_A_FAULT:
+                continue
+            action = already(e, live.paused)
+            if action is None:
+                errors.append(e)
+            elif action not in v.already_noted:
+                v.already_noted.add(action)
+                v.view.monitor.activity.add("state", "Already paused: a second Pause changed nothing" if live.paused
+                                            else "Not paused: a second Resume changed nothing", "vda")
         live.errors = [{"type": e.get("errorType"), "level": e.get("errorLevel"),
                         "description": e.get("errorDescription", "")} for e in errors]
         faults = {e.get("errorType", "error"): (2 if e.get("errorLevel") == "FATAL" else 1,

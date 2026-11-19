@@ -31,11 +31,13 @@ class Sink:
     async def goal(self, view, x, y, theta):
         self.calls.append(("goal", x, y, theta))
 
-    async def pause(self, view):
+    async def pause(self, view):  # as the ROS sink does; a VDA 5050 vehicle's state says so
         self.calls.append(("pause",))
+        view.live.paused = True
 
     async def resume(self, view):
         self.calls.append(("resume",))
+        view.live.paused = False
 
     async def cancel(self, view):
         self.calls.append(("cancel",))
@@ -481,6 +483,22 @@ def test_a_second_editor_is_told_to_reload(tmp_path):
         assert json.loads(path.read_text()) == GRAPH
         assert audit.commands()[-1]["kind"] == "command_rejected"
     editing(tmp_path, go)
+
+
+def test_pause_on_a_paused_robot_is_a_note_and_sends_nothing():
+    async def go(url, server, audit, sink, control):
+        async with connect(url) as ws:
+            await login(ws)
+            assert (await ask(ws, action="PAUSE", robot="a"))["type"] == "ack"
+            again = await ask(ws, action="PAUSE", robot="a")
+            assert again["type"] == "ack" and again["note"] == "Already paused. Nothing sent."
+            assert (await ask(ws, action="RESUME", robot="a")).get("note") is None
+            again = await ask(ws, action="RESUME", robot="a")
+            assert again["type"] == "ack" and again["note"] == "Not paused. Nothing sent."
+        assert sink.calls == [("pause",), ("resume",)]
+        assert [r["command"] for r in rows(audit, "command")] == ["PAUSE", "RESUME"]
+        assert rows(audit, "command_rejected") == []
+    bridge(go)
 
 
 def test_a_paused_robot_takes_no_goal_and_it_is_logged():

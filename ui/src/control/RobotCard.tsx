@@ -108,6 +108,7 @@ export function RobotCard({ ctx, v, where, ref }: { ctx: PanelContext; v: RobotV
   const stopHere = access.stop && r.capabilities.can_stop;
   const notice = state.notice && state.notice.robot === r.id && ctx.now - state.notice.at < NOTICE_MS ? state.notice.text : "";
   const shownLine = notice || line;
+  const quiet = !!notice && !!state.notice?.quiet;
   const send = (action: string) => ctx.send({ action, robot: r.id });
   const act = (k: Key) => {
     if (k === "details") ctx.openRobot(r.name);
@@ -190,7 +191,7 @@ export function RobotCard({ ctx, v, where, ref }: { ctx: PanelContext; v: RobotV
         )}
         {!drive && main && <button type="button" className="btn-main" onClick={() => act(main)}>{LABEL[main]}</button>}
         {!drive && shownLine && !(collapsed && !main) && (
-          <span className={`card__line ${notice ? "tone-warn" : "text-2"}`} data-testid={notice ? "notice" : "card-line"}>{shownLine}</span>
+          <span className={`card__line ${notice && !quiet ? "tone-warn" : "text-2"}`} data-testid={notice ? "notice" : "card-line"}>{shownLine}</span>
         )}
         {!drive && !collapsed && secondary.length > 0 && (
           <div className="card__sec" style={{ gridTemplateColumns: `repeat(${secondary.length},minmax(0,1fr))` }}>
