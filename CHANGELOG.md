@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v2.0.2
 
 - **Pause on a robot that's already paused is a note, not a warning.** Styri doesn't send it,
   and the robot's card says "Already paused. Nothing sent." in grey for a few seconds; the same
